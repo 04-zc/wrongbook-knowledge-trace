@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Local data and secrets
+data.db
+*.db
+*.db-journal
+secret.key
+backups/
+uploads/
+
+# WorkBuddy and temporary pipeline output
+.workbuddy/
+output/req_srs_20260909/
+output/pkg_template_extract/
+错题本知识溯源整理助手_论文包装升级方案*.docx
+
+# Browser automation temp files
+.playwright-cli/
+.playwright/
+
+# KaTeX development files (keep only minified runtime and woff2 fonts)
+static/vendor/katex/contrib/
+static/vendor/katex/katex.js
+static/vendor/katex/katex.mjs
+static/vendor/katex/katex.css
+static/vendor/katex/README.md
+static/vendor/katex/fonts/*.ttf
+static/vendor/katex/fonts/*.woff
+
+# Environment
+.env
+
+# OS
+Thumbs.db
+.DS_Store

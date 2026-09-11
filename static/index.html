@@ -1,0 +1,1190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错题本知识溯源整理助手</title>
+    <link rel="stylesheet" href="/static/style.css?v=20260909a">
+    <script src="/static/vue.global.js"></script>
+    <script src="/static/axios.min.js"></script>
+    <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
+    <script src="/static/vendor/katex/katex.min.js"></script>
+    <script src="/static/vendor/echarts.min.js"></script>
+</head>
+<body>
+<div id="app">
+    <!-- 登录 / 注册 -->
+    <div v-if="!authUser" class="auth-page">
+        <form class="auth-card" @submit.prevent="submitAuth">
+            <div class="auth-logo">错题本</div>
+            <h2>错题本知识溯源整理助手</h2>
+            <p class="auth-sub">{{ authMode === 'login' ? '登录你的账号' : '注册新账号' }}</p>
+            <input v-model.trim="authUsername" type="text" placeholder="账号（英文或数字）" autocomplete="username">
+            <input v-model="authPassword" type="password" placeholder="密码（英文或数字）" autocomplete="current-password">
+            <input v-if="authMode === 'register'" v-model="authConfirm" type="password" placeholder="再次输入密码" autocomplete="new-password">
+            <p v-if="authError" class="auth-error">{{ authError }}</p>
+            <button class="btn-primary auth-submit" type="submit" :disabled="authLoading">
+                {{ authLoading ? '处理中...' : (authMode === 'login' ? '登 录' : '注册并登录') }}
+            </button>
+            <button type="button" class="auth-switch" @click="toggleAuthMode">
+                {{ authMode === 'login' ? '还没有账号？去注册' : '已有账号？返回登录' }}
+            </button>
+            <button type="button" class="auth-switch" v-if="authMode === 'login'" @click="openResetModal">忘记密码？重置密码</button>
+            <p class="auth-rule">账号和密码只能使用英文字母和数字</p>
+        </form>
+    </div>
+
+    <template v-else>
+    <div v-if="loading" class="loading-mask">加载中...</div>
+    <div v-if="error" class="error-toast">{{ error }}</div>
+    <div class="app-shell">
+        <aside class="app-sidebar">
+            <div class="side-brand">
+                <div class="side-logo">错</div>
+                <div>
+                    <div class="side-title">错题本</div>
+                    <div class="side-subtitle">知识溯源助手</div>
+                </div>
+            </div>
+            <nav class="side-nav">
+                <button v-for="nav in navs" :key="nav.key" :class="{active: isNavActive(nav)}" @click="goTo(nav.key)">
+                    <span>{{ nav.label }}</span>
+                    <span v-if="nav.key==='review' && reviewPlanCounts.total" class="nav-badge">{{ reviewPlanCounts.total }}</span>
+                </button>
+            </nav>
+            <div class="side-user">
+                <div class="side-username">{{ authUser.username }}</div>
+                <button type="button" @click="openLlmConfig">模型与 OCR 配置</button>
+                <button type="button" @click="openAccountModal">账号设置</button>
+                <button type="button" @click="switchUser">切换用户</button>
+            </div>
+        </aside>
+        <div class="app-content">
+            <header class="app-header">
+                <div class="header-title">
+                    <h1>错题本知识溯源整理助手</h1>
+                    <p class="slogan">不只是记错题，更是找到错题的根。</p>
+                </div>
+            </header>
+
+            <main class="app-main">
+        <!-- 仪表盘 -->
+        <section v-if="currentNav==='dashboard'" class="section">
+            <h2>今日概览</h2>
+            <div class="cards">
+                <div class="card">
+                    <div class="card-title">总错题数</div>
+                    <div class="card-value">{{ questions.length }}</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">未掌握</div>
+                    <div class="card-value">{{ unmasteredCount }}</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">薄弱知识点 TOP3</div>
+                    <ul class="card-list">
+                        <li v-for="w in weakPoints.slice(0,3)" :key="w.id">{{ w.name }} <span class="badge">{{ w.weak_index }}</span></li>
+                        <li v-if="weakPoints.length===0">暂无数据</li>
+                    </ul>
+                </div>
+            </div>
+            <h3 style="margin-top:20px">最近错题</h3>
+            <div class="question-list">
+                <div class="q-item" v-for="q in recentQuestions" :key="q.id" @click="openQuestion(q)">
+                    <div class="q-title">{{ q.title_text || '(无标题)' }}</div>
+                    <div class="q-meta">
+                        <span class="tag">{{ q.subject_name || '未分类' }}</span>
+                        <span class="tag" :class="'status-'+q.status">{{ statusText(q.status) }}</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 错题录入 -->
+        <section v-if="currentNav==='input'" class="section">
+            <h2>错题录入</h2>
+            <div class="form">
+                <div class="form-row">
+                    <label>学科</label>
+                    <select v-model="form.subject_id">
+                        <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>导入试卷</label>
+                    <div class="upload-actions">
+                        <button type="button" class="upload-btn" @click="$refs.importFileInput.click()">导入 PDF / Word 试卷</button>
+                        <input ref="importFileInput" type="file" accept=".pdf,.doc,.docx" @change="handleImportFile" hidden>
+                    </div>
+                    <div v-if="importLoading" class="ocr-status">正在解析试卷，扫描版可能需要较长时间...</div>
+                    <p v-if="importMessage" class="add-hint">{{ importMessage }}</p>
+                </div>
+                <div class="form-row">
+                    <label>题干文本</label>
+                    <textarea v-model="form.title_text" rows="4" placeholder="输入题目，支持 LaTeX：$x^2$ 或 $$公式$$"></textarea>
+                    <div v-if="form.title_text" class="latex-preview" v-html="latexHtml(form.title_text)"></div>
+                </div>
+                <div class="form-row">
+                    <label>题干图片</label>
+                    <div class="upload-actions">
+                        <button type="button" class="upload-btn camera-btn" @click="openCamera">📷 拍摄题目</button>
+                        <button type="button" class="upload-btn" @click="$refs.fileInput.click()">🖼 选择图片</button>
+                        <input ref="fileInput" type="file" accept="image/*" @change="handleImageUpload" hidden>
+                        <input ref="captureInput" type="file" accept="image/*" capture="environment" @change="handleImageUpload" hidden>
+                    </div>
+                    <div v-if="form.ocrLoading" class="ocr-status">OCR 识别中，请稍候...</div>
+                    <img v-if="form.title_image" :src="form.title_image" class="preview-img">
+                </div>
+                <div class="form-row">
+                    <label>正确答案</label>
+                    <textarea v-model="form.correct_answer" rows="2"></textarea>
+                </div>
+                <div class="form-row">
+                    <label>学生答案</label>
+                    <textarea v-model="form.user_answer" rows="2"></textarea>
+                </div>
+                <div class="form-row">
+                    <label>解析</label>
+                    <textarea v-model="form.analysis" rows="3"></textarea>
+                </div>
+                <div class="form-row">
+                    <label>错误原因</label>
+                    <input type="text" v-model="form.mistake_reason">
+                </div>
+                <div class="form-row">
+                    <label>当前状态</label>
+                    <select v-model.number="form.status">
+                        <option :value="0">未掌握</option>
+                        <option :value="1">已掌握</option>
+                        <option :value="2">已复习</option>
+                        <option :value="3">已归档</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>关联知识点</label>
+                    <div class="kp-tags">
+                        <span class="kp-tag" v-for="(kp, idx) in form.knowledge_points" :key="kp.id">
+                            {{ kp.name }} <small>({{ (kp.confidence*100).toFixed(0) }}%)</small>
+                            <button type="button" @click="removeKp(idx)" style="background:#dc2626;color:#ffffff;border:1px solid #991b1b;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;line-height:1.5">删除</button>
+                        </span>
+                        <button type="button" class="btn-sm" @click="showKpSelector=true">+ 添加</button>
+                        <button type="button" class="btn-sm btn-ai" @click="recommendKp" :disabled="recommending">
+                            {{ recommending ? 'AI推荐中...' : 'AI推荐知识点' }}
+                        </button>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button class="btn-primary" @click="saveQuestion">保存错题</button>
+                    <button class="btn" @click="resetForm">重置</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 错题库 -->
+        <section v-if="currentNav==='library'" class="section">
+            <h2>错题库</h2>
+            <div class="lib-tabs">
+                <button type="button" :class="{active: !trashMode}" @click="closeTrash">错题列表</button>
+                <button type="button" :class="{active: trashMode}" @click="openTrash">回收站</button>
+            </div>
+            <template v-if="!trashMode">
+                <div class="filters">
+                    <select v-model.number="filter.subject_id" @change="onFilterSubjectChange">
+                        <option :value="null">全部学科</option>
+                        <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
+                    <select v-model.number="filter.kp_id" @change="loadQuestions">
+                        <option :value="null">全部知识点</option>
+                        <option v-for="k in filterKps" :key="k.id" :value="k.id">{{ '　'.repeat(k.level) }}{{ k.name }}</option>
+                    </select>
+                    <select v-model.number="filter.status" @change="loadQuestions">
+                        <option :value="null">全部状态</option>
+                        <option :value="0">未掌握</option>
+                        <option :value="1">已掌握</option>
+                        <option :value="2">已复习</option>
+                        <option :value="3">已归档</option>
+                    </select>
+                    <input type="text" v-model="filter.keyword" placeholder="搜索题干" @input="loadQuestions">
+                </div>
+                <div class="batch-toolbar">
+                    <label class="batch-check">
+                        <input type="checkbox" :checked="selectedQuestionIds.length > 0 && selectedQuestionIds.length === filteredQuestions.length" @change="toggleSelectAllQuestions">
+                        全选（已选 {{ selectedQuestionIds.length }} 题）
+                    </label>
+                    <select v-model="batchAction" @change="handleBatchAction">
+                        <option value="">选择操作</option>
+                        <option value="bind_kp">关联知识点</option>
+                        <option value="status">修改状态</option>
+                        <option value="delete">删除</option>
+                    </select>
+                    <template v-if="batchAction==='status'">
+                        <select v-model.number="batchStatus">
+                            <option :value="0">未掌握</option>
+                            <option :value="1">已掌握</option>
+                            <option :value="2">已复习</option>
+                            <option :value="3">已归档</option>
+                        </select>
+                        <button type="button" class="btn-sm" @click="batchUpdateStatus">应用状态</button>
+                    </template>
+                </div>
+                <div class="question-list">
+                    <div class="q-item" v-for="q in filteredQuestions" :key="q.id">
+                        <div class="q-check-title">
+                            <input type="checkbox" :checked="selectedQuestionIds.includes(q.id)" @change="toggleQuestionSelect(q.id)">
+                            <div class="q-title" @click="openQuestion(q)">{{ q.title_text || '(无标题)' }}</div>
+                        </div>
+                        <div class="q-meta">
+                            <span class="tag">{{ q.subject_name || '未分类' }}</span>
+                            <span class="tag" :class="'status-'+q.status">{{ statusText(q.status) }}</span>
+                            <span class="tag" v-for="kp in q.knowledge_points" :key="kp.id">{{ kp.name }}</span>
+                        </div>
+                        <div class="q-actions">
+                            <button class="btn-sm" @click="editQuestion(q)">编辑</button>
+                            <button type="button" @click="deleteQuestion(q)" style="background:#dc2626;color:#ffffff;border:2px solid #991b1b;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;cursor:pointer">删除</button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+            <template v-else>
+                <p v-if="!trashQuestions.length" class="empty-tip">回收站是空的。</p>
+                <div class="question-list">
+                    <div class="q-item" v-for="q in trashQuestions" :key="q.id">
+                        <div class="q-title">{{ q.title_text || '(无标题)' }}</div>
+                        <div class="q-meta">
+                            <span class="tag">{{ q.subject_name || '未分类' }}</span>
+                            <span class="tag">已删除</span>
+                        </div>
+                        <div class="q-actions">
+                            <button type="button" class="btn-sm btn-primary" @click="restoreQuestion(q)">恢复</button>
+                            <button type="button" class="btn-sm" @click="purgeQuestion(q)" style="background:#dc2626;color:#fff;border-color:#991b1b">彻底删除</button>
+                        </div>
+                    </div>
+                </div>
+            </template>
+        </section>
+
+        <!-- 薄弱分析 -->
+        <section v-if="currentNav==='weak'" class="section">
+            <h2>薄弱知识图谱</h2>
+            <div class="filters">
+                <select v-model.number="weakFilter.subject_id" @change="loadWeak">
+                    <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
+                </select>
+                <span class="filter-label" v-if="currentWeakSubjectName">当前学科：{{ currentWeakSubjectName }}</span>
+            </div>
+            <div class="weak-table">
+                <table>
+                    <thead>
+                        <tr><th>知识点</th><th>学科</th><th>错题数</th><th>未掌握</th><th>累计错误</th><th>近7天</th><th>薄弱指数</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="w in weakPoints" :key="w.id">
+                            <td>{{ w.name }}</td>
+                            <td>{{ w.subject_name }}</td>
+                            <td>{{ w.question_count }}</td>
+                            <td>{{ w.unmastered_count }}</td>
+                            <td>{{ w.error_count }}</td>
+                            <td>{{ w.recent_errors }}</td>
+                            <td><span class="badge" :style="{background: heatColor(w.weak_index)}">{{ w.weak_index }}</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <h3 style="margin-top:24px">近 30 天错误趋势</h3>
+            <div ref="trendChartEl" class="chart-box"></div>
+            <h3 style="margin-top:24px">复习优先级建议</h3>
+            <p v-if="!priorityData.length" class="empty-tip">暂无可分析的薄弱知识点。</p>
+            <div class="priority-list" v-else>
+                <div v-for="p in priorityData" :key="p.id" class="priority-item">
+                    <span class="priority-badge" :class="'p-' + p.priority">{{ p.priority }}优先</span>
+                    <div class="priority-main">
+                        <strong>{{ p.name }}</strong>
+                        <span>{{ p.suggestion }}</span>
+                    </div>
+                    <span class="priority-score">薄弱指数 {{ p.weak_index }}</span>
+                </div>
+            </div>
+            <h3 style="margin-top:24px">搭建 {{ currentWeakSubjectName || '当前学科' }} 知识树</h3>
+            <div class="weak-kp-add">
+                <input type="text" v-model="weakKpName" @keyup.enter="addWeakKp" placeholder="新知识点名称，如：三角函数" ref="weakKpInput">
+                <select v-model.number="weakParentId">
+                    <option :value="null">作为一级知识点</option>
+                    <option v-for="k in kpTree" :key="k.id" :value="k.id">{{ '　'.repeat(k.level) }}{{ k.name }}</option>
+                </select>
+                <button class="btn-primary" @click="addWeakKp">添加</button>
+            </div>
+            <p v-if="weakAddHint" class="add-hint">将添加为「{{ weakAddHint }}」的子知识点</p>
+            <div v-if="!kpTree.length" class="empty-tip">
+                当前学科还没有知识点，在上方输入名称并点击「添加」，先建出一级知识点。
+            </div>
+            <div class="kp-tree" v-else>
+                <div v-for="n in kpTree" :key="n.id" class="tree-branch" :class="{'tree-root': n.level===0}">
+                    <div class="tree-node-row" :style="{marginLeft: n.level*26+'px'}">
+                        <span class="tree-marker" v-if="n.level>0">└─</span>
+                        <span class="tree-dot" v-else>●</span>
+                        <span class="tree-node-name">{{ n.name }}</span>
+                        <span class="badge" v-if="n.question_count">错题 {{ n.question_count }}</span>
+                        <button type="button" class="mini-btn" @click="openAiMaterial(n, 'concept')">概念回顾</button>
+                        <button type="button" class="mini-btn" @click="openTypicalExamples(n)">典型例题</button>
+                        <button type="button" class="mini-btn" @click="openTypicalExamples(n, 'variant')">变式练习</button>
+                        <button type="button" class="mini-btn" @click="startChildKp(n)">+ 子级</button>
+                        <button type="button" class="mini-btn mini-danger" @click="deleteWeakKp(n)">删除</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 知识图谱 -->
+        <section v-if="currentNav==='graph'" class="section">
+            <h2>知识图谱</h2>
+            <div class="filters">
+                <select v-model.number="graphFilter.subject_id" @change="loadGraph">
+                    <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
+                </select>
+                <span class="filter-label">点击节点查看知识点详情与 AI 精要</span>
+            </div>
+            <div class="graph-legend">
+                <span><i class="legend-dot center"></i>学科中心</span>
+                <span><i class="legend-dot level1"></i>一级分类</span>
+                <span><i class="legend-dot level2"></i>细分知识点</span>
+                <span><i class="legend-dot level3"></i>更深层级</span>
+            </div>
+            <div class="graph-mode-tabs">
+                <button type="button" :class="{active: graphChartMode==='layered'}" @click="switchGraphMode('layered')">分层导图</button>
+                <button type="button" :class="{active: graphChartMode==='tree'}" @click="switchGraphMode('tree')">树图</button>
+                <button type="button" :class="{active: graphChartMode==='sunburst'}" @click="switchGraphMode('sunburst')">旭日图</button>
+            </div>
+            <div class="graph-canvas" v-if="graphSubject" v-show="graphChartMode==='layered'">
+                <div class="graph-center">{{ graphSubject.name }}</div>
+                <div class="graph-levels">
+                    <div v-for="layer in graphLevels" :key="layer.level" class="graph-layer">
+                        <div class="graph-level-title">{{ layer.level === 0 ? '一级分类' : ('第 ' + (layer.level + 1) + ' 层') }}</div>
+                        <button type="button" v-for="n in layer.nodes" :key="n.id" class="graph-node" @click="openGraphNode(n)">
+                            <span class="graph-node-name">{{ n.name }}</span>
+                            <span class="graph-node-count" v-if="n.question_count">{{ n.question_count }}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div v-show="graphChartMode !== 'layered'" ref="graphChartEl" class="chart-box graph-chart"></div>
+            <p v-if="!graphSubject" class="empty-tip">当前学科还没有知识点，请先到「学科设置」搭建知识树。</p>
+        </section>
+
+        <!-- 统计报表 -->
+        <section v-if="currentNav==='report'" class="section">
+            <h2>统计报表</h2>
+            <div class="filters">
+                <select v-model.number="reportFilter.subject_id" @change="loadReport">
+                    <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
+                </select>
+            </div>
+            <template v-if="reportData">
+                <div class="report-cards">
+                    <div class="report-card"><span>错题总数</span><strong>{{ reportData.totals.questions }}</strong></div>
+                    <div class="report-card"><span>知识点数</span><strong>{{ reportData.totals.knowledge_points }}</strong></div>
+                    <div class="report-card"><span>近30天新增</span><strong>{{ reportData.totals.added_30d }}</strong></div>
+                    <div class="report-card"><span>近30天仍错</span><strong>{{ reportData.totals.wrong_reviews_30d }}</strong></div>
+                    <div class="report-card"><span>复习正确率</span><strong>{{ reportData.totals.reviews.accuracy }}%</strong></div>
+                    <div class="report-card"><span>待复习计划</span><strong>{{ reportData.totals.review_plans.total }}</strong></div>
+                </div>
+                <div class="report-charts">
+                    <div>
+                        <h3>错题状态分布</h3>
+                        <div ref="reportStatusChart" class="chart-box"></div>
+                    </div>
+                    <div>
+                        <h3>薄弱知识点排行</h3>
+                        <div ref="reportWeakChart" class="chart-box"></div>
+                    </div>
+                </div>
+            </template>
+            <p v-else class="empty-tip">正在生成报表...</p>
+        </section>
+
+        <!-- 复习模式 -->
+        <section v-if="currentNav==='review'" class="section">
+            <h2>复习模式</h2>
+
+            <template v-if="reviewView==='home'">
+                <div class="filters">
+                    <select v-model.number="reviewFilter.subject_id" @change="loadReview">
+                        <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
+                    <span class="filter-label" v-if="reviewLoading">正在生成今日推荐...</span>
+                </div>
+                <div class="today-panel">
+                    <h3>今日推荐复习</h3>
+                    <p class="review-advice">{{ reviewAdvice }}</p>
+                    <div class="review-rec-list" v-if="reviewRecommendations.length">
+                        <div v-for="kp in reviewRecommendations" :key="kp.id" class="review-rec-card">
+                            <div class="review-rec-name">{{ kp.name }}</div>
+                            <div class="review-rec-meta">错题 {{ kp.question_count }} · 未掌握 {{ kp.unmastered_count }} · 薄弱指数 {{ kp.weak_index }}</div>
+                            <button type="button" class="btn-primary btn-mini" @click="selectReviewKp(kp)">开始复习</button>
+                        </div>
+                    </div>
+                    <p v-else class="empty-tip">当前学科暂无可推荐的复习知识点。</p>
+                </div>
+                <div class="plan-panel">
+                    <div class="plan-head">
+                        <div>
+                            <h3>复习计划</h3>
+                            <p class="plan-counts">今日待复习 {{ reviewPlanCounts.today }} 条 · 逾期 {{ reviewPlanCounts.overdue }} 条</p>
+                        </div>
+                        <button type="button" class="btn-primary" @click="generateTodayPlans">生成今日复习计划</button>
+                    </div>
+                    <p v-if="reviewPlanGroups.overdue.length" class="plan-alert">有 {{ reviewPlanGroups.overdue.length }} 条复习计划已逾期，请尽快完成。</p>
+                    <div v-for="group in [
+                        {title:'逾期', items:reviewPlanGroups.overdue},
+                        {title:'今天', items:reviewPlanGroups.today},
+                        {title:'未来', items:reviewPlanGroups.upcoming}
+                    ]" :key="group.title" v-show="group.items.length" class="plan-group">
+                        <h4>{{ group.title }}</h4>
+                        <div v-for="p in group.items" :key="p.id" class="plan-item">
+                            <div class="plan-question">{{ p.question_text }}</div>
+                            <span class="plan-date">{{ p.plan_date }}</span>
+                            <button type="button" class="mini-btn" @click="startPlan(p)">开始复习</button>
+                            <button type="button" class="mini-btn" @click="completePlan(p, 1)">完成</button>
+                            <button type="button" class="mini-btn" @click="completePlan(p, 0)">跳过</button>
+                            <button type="button" class="mini-btn mini-danger" @click="deletePlan(p)">删除</button>
+                        </div>
+                    </div>
+                    <details v-if="reviewPlanGroups.finished.length" class="plan-history">
+                        <summary>已完成 / 已跳过（{{ reviewPlanGroups.finished.length }}）</summary>
+                        <div v-for="p in reviewPlanGroups.finished" :key="p.id" class="plan-item muted">
+                            <div class="plan-question">{{ p.question_text }}</div>
+                            <span class="plan-date">{{ p.plan_date }}</span>
+                            <span class="tag">{{ p.status_text }}</span>
+                        </div>
+                    </details>
+                    <p v-if="!reviewPlans.length" class="empty-tip">还没有复习计划，可以点「生成今日复习计划」或进入错题后自定义日期。</p>
+                </div>
+                <h3 style="margin-top:20px">按知识点分类</h3>
+                <div class="review-kp-grid">
+                    <button type="button" v-for="kp in reviewKps" :key="kp.id" class="review-kp-card" @click="selectReviewKp(kp)">
+                        <span class="review-kp-name" :style="{paddingLeft: kp.level * 14 + 'px'}">{{ kp.name }}</span>
+                        <span class="review-kp-count" :class="{empty: !kp.question_count}">{{ kp.question_count }} 题</span>
+                    </button>
+                </div>
+            </template>
+
+            <template v-else-if="reviewView==='questions'">
+                <div class="review-subhead">
+                    <button type="button" class="btn" @click="backToReviewHome">← 返回</button>
+                    <h3>{{ reviewSelectedKp && reviewSelectedKp.name }} 的错题</h3>
+                </div>
+                <p v-if="!reviewQuestions.length" class="empty-tip">这个知识点下还没有错题。</p>
+                <div class="review-question-scroll" v-else>
+                    <button type="button" v-for="q in reviewQuestions" :key="q.id" class="review-question-item" @click="openReviewQuestion(q)">
+                        <span class="review-question-title">{{ q.title_text }}</span>
+                        <span class="tag" :class="'status-' + q.status">{{ statusText(q.status) }}</span>
+                    </button>
+                </div>
+            </template>
+
+            <template v-else-if="reviewView==='detail' && reviewSelectedQuestion">
+                <div class="review-subhead">
+                    <button type="button" class="btn" @click="backToReviewQuestions">← 返回错题列表</button>
+                    <h3>错题复习</h3>
+                </div>
+                <div class="review-detail">
+                    <div class="review-detail-block">
+                        <label>题目</label>
+                        <div class="review-detail-text" v-html="latexHtml(reviewSelectedQuestion.title_text)"></div>
+                    </div>
+                    <div class="review-detail-block">
+                        <label>我的答案</label>
+                        <div class="review-detail-text" v-html="latexHtml(reviewSelectedQuestion.user_answer || '未填写')"></div>
+                    </div>
+                    <div class="review-detail-block" v-if="reviewShowAnswer">
+                        <label>正确答案</label>
+                        <div class="review-detail-text" v-html="latexHtml(reviewSelectedQuestion.correct_answer || '未填写')"></div>
+                    </div>
+                    <div class="review-detail-block">
+                        <label>解析</label>
+                        <div class="review-detail-text" v-html="latexHtml(reviewSelectedQuestion.analysis || '暂无解析')"></div>
+                    </div>
+                    <div class="review-detail-actions">
+                        <button type="button" class="btn" @click="reviewShowAnswer = !reviewShowAnswer">{{ reviewShowAnswer ? '隐藏答案' : '显示答案' }}</button>
+                        <button type="button" class="btn-primary" @click="markReview(reviewSelectedQuestion, 1)">标记已掌握</button>
+                        <button type="button" class="btn" @click="markReview(reviewSelectedQuestion, 0)">仍需加强</button>
+                        <button type="button" class="btn-primary" @click="explainReviewQuestion" :disabled="reviewAiLoading">{{ reviewAiLoading ? 'AI 解答中...' : 'AI 解答' }}</button>
+                        <button type="button" class="btn" @click="openTrace(reviewSelectedQuestion)">知识溯源</button>
+                        <button type="button" class="btn" @click="openMindMap(reviewSelectedQuestion)">知识导图</button>
+                        <button type="button" class="btn" @click="openPlanModal(reviewSelectedQuestion)">加入复习计划</button>
+                    </div>
+                </div>
+                <div v-if="reviewAiContent" class="review-ai-panel">
+                    <h3>AI 解答</h3>
+                    <pre class="review-ai-content">{{ reviewAiContent }}</pre>
+                </div>
+            </template>
+        </section>
+
+        <!-- 学科设置 -->
+        <section v-if="currentNav==='settings'" class="section">
+            <h2>学科设置</h2>
+            <div class="form">
+                <h3>学科管理</h3>
+                <div class="form-row inline">
+                    <input type="text" v-model="newSubject" placeholder="新学科名称">
+                    <button class="btn-primary" @click="addSubject">添加</button>
+                </div>
+                <div class="subject-chips">
+                    <button type="button" v-for="s in subjects" :key="s.id" class="subject-chip" :class="{active: kpForm.subject_id === s.id}" @click="selectSubjectDir(s)">
+                        {{ s.name }}
+                        <span class="chip-count" v-if="subjectKpCount(s.id)">{{ subjectKpCount(s.id) }}</span>
+                    </button>
+                </div>
+                <p v-if="!subjects.length" class="empty-tip">先添加一个学科，再开始搭建知识点目录。</p>
+                <h3 style="margin-top:20px">知识点目录</h3>
+                <div class="dir-search">
+                    <input type="search" v-model="kpSearch" placeholder="输入知识点名称，自动定位到对应目录">
+                </div>
+                <div v-if="kpRows.length" class="dir-tree">
+                    <div v-for="row in kpRows" :key="row.key" class="dir-row" :class="{'dir-subject': row.isSubject, active: !row.isSubject && row.node.id === kpForm.parent_id, flash: row.flash}">
+                        <button type="button" class="dir-toggle" @click="toggleDirRow(row)">
+                            <span class="dir-arrow">{{ row.expanded ? '▾' : '▸' }}</span>
+                        </button>
+                        <button type="button" class="dir-label" @click="row.isSubject ? toggleDirRow(row) : openKpDetail(row.node)" :style="{paddingLeft: (row.isSubject ? 0 : row.depth * 22) + 'px'}">
+                            <span class="dir-dot" v-if="row.isSubject">📁</span>
+                            <span class="dir-dot" v-else>●</span>
+                            <span class="dir-name" :class="{highlight: row.highlight}">{{ row.name }}</span>
+                            <span class="badge" v-if="row.count">{{ row.count }}</span>
+                        </button>
+                        <span class="dir-actions">
+                            <button v-if="row.isSubject" type="button" class="mini-btn" @click.stop="startRootKp(row.node)">＋ 一级</button>
+                            <template v-else>
+                                <button type="button" class="mini-btn" @click.stop="startDirChild(row.node)">＋ 子级</button>
+                                <button type="button" class="mini-btn mini-danger" @click.stop="deleteDirKp(row.node)">删除</button>
+                            </template>
+                        </span>
+                    </div>
+                </div>
+                <div v-if="kpSearch && !kpRows.length" class="empty-tip">没有找到匹配的知识点，换个关键词试试。</div>
+                <div v-if="!kpSearch && !kpRows.length" class="empty-tip">该学科还没有知识点，展开学科后点击「＋ 一级」开始搭建。</div>
+                <div class="dir-add" v-if="kpForm.subject_id">
+                    <span class="dir-add-label" v-if="settingsKpHint">添加到「{{ settingsKpHint }}」下</span>
+                    <span class="dir-add-label" v-else>在「{{ selectedDirSubjectName }}」下添加一级知识点</span>
+                    <div class="dir-add-line">
+                        <input type="text" ref="settingsKpInput" v-model="kpForm.name" @keyup.enter="addDirKp" placeholder="输入新知识点名称">
+                        <button class="btn-primary" @click="addDirKp">添加知识点</button>
+                        <button v-if="settingsKpHint" type="button" class="btn" @click="clearDirParent">取消挂接</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+        </div>
+    </div>
+
+    <!-- 账号设置 -->
+    <div class="modal" v-if="showAccountModal" @click.self="showAccountModal=false">
+        <div class="modal-body">
+            <h3>账号设置</h3>
+            <h4>修改账号名称</h4>
+            <div class="form-row"><input v-model.trim="accountForm.new_username" placeholder="新账号（字母或数字）"></div>
+            <div class="form-row"><input type="password" v-model="accountForm.rename_password" placeholder="当前密码"></div>
+            <button type="button" class="btn-primary" @click="renameAccount">修改账号</button>
+            <h4 style="margin-top:20px">修改密码</h4>
+            <div class="form-row"><input type="password" v-model="accountForm.old_password" placeholder="当前密码"></div>
+            <div class="form-row"><input type="password" v-model="accountForm.new_password" placeholder="新密码（字母或数字）"></div>
+            <div class="form-row"><input type="password" v-model="accountForm.confirm_password" placeholder="确认新密码"></div>
+            <button type="button" class="btn-primary" @click="changePassword">修改密码</button>
+            <h4 style="margin-top:20px">数据备份与恢复</h4>
+            <div class="review-detail-actions">
+                <a class="btn" href="/api/backup/export">导出数据包</a>
+                <label class="btn" style="cursor:pointer">导入数据包<input type="file" accept=".zip,.json,.db,.sqlite,.sqlite3" hidden @change="importBackupPackage"></label>
+            </div>
+            <h4 style="margin-top:20px;color:#b91c1c">删除账号</h4>
+            <div class="form-row"><input type="password" v-model="accountForm.delete_password" placeholder="输入密码确认删除"></div>
+            <button type="button" class="btn" @click="deleteAccount" style="color:#b91c1c;border-color:#fca5a5">永久删除账号及全部数据</button>
+            <div class="modal-actions"><button class="btn" @click="showAccountModal=false">关闭</button></div>
+        </div>
+    </div>
+
+    <!-- 重置密码 -->
+    <div class="modal" v-if="showResetModal" @click.self="showResetModal=false">
+        <div class="modal-body">
+            <h3>重置密码</h3>
+            <div class="form-row"><input v-model.trim="resetForm.username" placeholder="账号"></div>
+            <div class="form-row"><input type="password" v-model="resetForm.new_password" placeholder="新密码（字母或数字）"></div>
+            <div class="form-row"><input type="password" v-model="resetForm.confirm_password" placeholder="确认新密码"></div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="resetPassword">确认重置</button>
+                <button class="btn" @click="showResetModal=false">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 大模型配置 -->
+    <div class="modal" v-if="showLlmModal" @click.self="showLlmModal=false">
+        <div class="modal-body">
+            <h3>模型与 OCR 配置</h3>
+            <div class="form-row">
+                <label>API Key</label>
+                <input type="password" v-model="settings.llm_api_key" placeholder="DeepSeek / 通义千问 Key">
+            </div>
+            <div class="form-row">
+                <label>模型</label>
+                <input type="text" v-model="settings.llm_model" placeholder="deepseek-chat 或 qwen-turbo">
+            </div>
+            <h4 style="margin-top:18px">OCR 参数</h4>
+            <div class="form-row">
+                <label>识别语言</label>
+                <select v-model="settings.ocr_lang">
+                    <option value="ch">中文 + 英文</option>
+                    <option value="en">英文</option>
+                    <option value="japan">日文</option>
+                    <option value="korean">韩文</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>文字方向识别</label>
+                <select v-model="settings.ocr_use_orientation">
+                    <option value="true">开启（适合倾斜拍摄）</option>
+                    <option value="false">关闭（速度更快）</option>
+                </select>
+            </div>
+            <div class="form-row">
+                <label>置信度阈值（低于该值的结果会被忽略）</label>
+                <input type="number" v-model="settings.ocr_confidence_threshold" min="0" max="1" step="0.05">
+            </div>
+            <h4 style="margin-top:18px">知识点推荐阈值</h4>
+            <div class="form-row">
+                <label>自动绑定阈值（达到即自动绑定）</label>
+                <input type="number" v-model="settings.kp_auto_threshold" min="0" max="1" step="0.05">
+            </div>
+            <div class="form-row">
+                <label>待确认阈值（低于它则忽略）</label>
+                <input type="number" v-model="settings.kp_pending_threshold" min="0" max="1" step="0.05">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="saveLlmConfig">保存配置</button>
+                <button class="btn" @click="showLlmModal=false">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 摄像头拍摄 -->
+    <div class="modal" v-if="cameraActive" @click.self="closeCamera">
+        <div class="camera-panel">
+            <h3>拍摄题目</h3>
+            <video ref="cameraVideo" autoplay playsinline muted></video>
+            <p v-if="cameraError" class="camera-error">{{ cameraError }}</p>
+            <div class="camera-actions">
+                <button class="btn-primary" @click="takePhoto">拍摄</button>
+                <button class="btn" @click="closeCamera">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 错题编辑弹窗 -->
+    <div class="modal" v-if="showEditModal" @click.self="closeEditModal">
+        <div class="modal-body edit-modal">
+            <h3>编辑错题</h3>
+            <div class="form">
+                <div class="form-row">
+                    <label>学科</label>
+                    <select v-model.number="form.subject_id">
+                        <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>题干文本</label>
+                    <textarea v-model="form.title_text" rows="4"></textarea>
+                </div>
+                <div class="form-row">
+                    <label>题干图片</label>
+                    <div class="upload-actions">
+                        <button type="button" class="upload-btn" @click="$refs.editFileInput.click()">选择图片</button>
+                        <input ref="editFileInput" type="file" accept="image/*" @change="handleImageUpload" hidden>
+                    </div>
+                    <img v-if="form.title_image" :src="form.title_image" class="preview-img">
+                </div>
+                <div class="form-row"><label>正确答案</label><textarea v-model="form.correct_answer" rows="2"></textarea></div>
+                <div class="form-row"><label>学生答案</label><textarea v-model="form.user_answer" rows="2"></textarea></div>
+                <div class="form-row"><label>解析</label><textarea v-model="form.analysis" rows="3"></textarea></div>
+                <div class="form-row"><label>错误原因</label><input type="text" v-model="form.mistake_reason"></div>
+                <div class="form-row">
+                    <label>当前状态</label>
+                    <select v-model.number="form.status">
+                        <option :value="0">未掌握</option>
+                        <option :value="1">已掌握</option>
+                        <option :value="2">已复习</option>
+                        <option :value="3">已归档</option>
+                    </select>
+                </div>
+                <div class="form-row">
+                    <label>关联知识点</label>
+                    <div class="kp-tags">
+                        <span class="kp-tag" v-for="(kp, idx) in form.knowledge_points" :key="kp.id">
+                            {{ kp.name }} <small>({{ (kp.confidence*100).toFixed(0) }}%)</small>
+                            <button type="button" @click="removeKp(idx)" style="background:#dc2626;color:#fff;border:1px solid #991b1b;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px">删除</button>
+                        </span>
+                        <button type="button" class="btn-sm" @click="showKpSelector=true">+ 添加</button>
+                        <button type="button" class="btn-sm btn-ai" @click="recommendKp" :disabled="recommending">{{ recommending ? 'AI推荐中...' : 'AI推荐知识点' }}</button>
+                    </div>
+                </div>
+                <div class="form-actions">
+                    <button class="btn-primary" @click="saveEditQuestion">保存修改</button>
+                    <button class="btn" @click="closeEditModal">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入试卷预览 -->
+    <div class="modal" v-if="importPreview.length" @click.self="cancelImport">
+        <div class="modal-body edit-modal">
+            <h3>导入预览（{{ importPreview.filter(q => q.checked).length }} / {{ importPreview.length }} 题）</h3>
+            <p class="import-mode" v-if="importMessage">{{ importMessage }}</p>
+            <div class="import-list">
+                <label v-for="(item, idx) in importPreview" :key="idx" class="import-item">
+                    <input type="checkbox" v-model="item.checked">
+                    <textarea v-model="item.title_text" rows="3"></textarea>
+                </label>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="saveImportedQuestions">确认导入</button>
+                <button class="btn" @click="cancelImport">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI 生成内容 -->
+    <div class="modal" v-if="aiModal.show" @click.self="aiModal.show=false">
+        <div class="modal-body edit-modal">
+            <h3>{{ aiModal.title }}</h3>
+            <div v-if="aiLoading" class="ocr-status">大模型生成中，请稍候...</div>
+            <textarea v-model="aiModal.content" rows="14" class="ai-content" placeholder="生成内容会显示在这里"></textarea>
+            <div v-if="aiModal.content" class="latex-preview" v-html="latexHtml(aiModal.content)"></div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="saveAiMaterial">保存到知识库</button>
+                <button class="btn" @click="regenerateAiMaterial">重新生成</button>
+                <button class="btn" @click="aiModal.show=false">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 典型例题 -->
+    <div class="modal" v-if="typicalModal.show" @click.self="typicalModal.show=false">
+        <div class="modal-body edit-modal">
+            <h3>{{ typicalModal.kp && typicalModal.kp.name }} · {{ typicalModal.mode==='variant' ? '变式练习' : '典型例题' }}</h3>
+            <template v-if="typicalModal.view==='own'">
+                <h4>来自我的错题库</h4>
+                <div v-if="typicalLoading" class="ocr-status">加载中...</div>
+                <p v-else-if="!typicalModal.ownExamples.length" class="empty-tip">这个知识点下还没有错题。</p>
+                <div v-else class="typical-list">
+                    <div v-for="(q, idx) in typicalModal.ownExamples" :key="q.id" class="typical-item">
+                        <div class="typical-question" v-html="latexHtml(q.title_text)"></div>
+                        <p class="typical-source">来源：我的错题 · {{ (q.created_at || '').slice(0, 10) }}</p>
+                        <button type="button" class="mini-btn" @click="toggleTypicalAnswer('own-' + idx)">{{ typicalModal.openAnswer === 'own-' + idx ? '隐藏答案' : '查看答案' }}</button>
+                        <div v-if="typicalModal.openAnswer === 'own-' + idx" class="typical-answer">
+                            <p><strong>答案：</strong><span v-html="latexHtml(q.correct_answer || '未填写')"></span></p>
+                            <p><strong>解析：</strong><span v-html="latexHtml(q.analysis || '暂无解析')"></span></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-primary" @click="generateTypicalAi" :disabled="typicalAiLoading">{{ typicalAiLoading ? '生成中...' : ('AI 生成' + (typicalModal.mode==='variant' ? '变式练习' : '典型例题')) }}</button>
+                    <button class="btn" @click="typicalModal.show=false">关闭</button>
+                </div>
+            </template>
+            <template v-else>
+                <div class="review-subhead">
+                    <button type="button" class="btn" @click="typicalModal.view='own'">← 返回我的错题</button>
+                    <h4 style="margin:0">AI 生成{{ typicalModal.mode==='variant' ? '变式练习' : '典型例题' }}</h4>
+                </div>
+                <p class="typical-source">来源：AI 生成（不虚构地市和年份）</p>
+                <div v-if="typicalAiLoading" class="ocr-status">正在生成，请稍候...</div>
+                <div class="typical-list" v-else>
+                    <div v-for="(q, idx) in typicalModal.questions" :key="q._key || idx" class="typical-item">
+                        <label class="typical-select">
+                            <input type="checkbox" v-model="q._selected">
+                            选择本题
+                        </label>
+                        <div class="typical-question" v-html="latexHtml(q.question)"></div>
+                        <div class="typical-actions">
+                            <button type="button" class="mini-btn" @click="toggleTypicalAnswer('ai-' + idx)">{{ typicalModal.openAnswer === 'ai-' + idx ? '隐藏答案' : '查看答案' }}</button>
+                            <button type="button" class="mini-btn" @click="saveTypicalOne(q)">保存本题</button>
+                        </div>
+                        <div v-if="typicalModal.openAnswer === 'ai-' + idx" class="typical-answer">
+                            <p><strong>答案：</strong><span v-html="latexHtml(q.answer)"></span></p>
+                            <p><strong>解析：</strong><span v-html="latexHtml(q.analysis)"></span></p>
+                        </div>
+                    </div>
+                    <p v-if="!typicalModal.questions.length && !typicalAiLoading" class="empty-tip">还没有生成内容。</p>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn-primary" v-if="typicalModal.questions.length" @click="saveTypicalAi">保存选中题目</button>
+                    <button class="btn" @click="continueTypicalAi" :disabled="typicalAiLoading">继续生成更多题目</button>
+                    <button class="btn" @click="generateTypicalAi" :disabled="typicalAiLoading">重新生成</button>
+                    <button class="btn" @click="typicalModal.show=false">关闭</button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- 待确认知识点 -->
+    <div class="modal" v-if="showPendingKpModal" @click.self="showPendingKpModal=false">
+        <div class="modal-body">
+            <h3>待确认知识点</h3>
+            <p class="typical-source">置信度处于待确认区间，请选择是否绑定。</p>
+            <div class="kp-tree">
+                <div v-for="k in pendingKps" :key="k.id">
+                    <div class="kp-option" :class="{selected: k._selected}" @click="k._selected = !k._selected">
+                        <span class="kp-checkbox" :class="{checked: k._selected}">{{ k._selected ? '✓' : '' }}</span>
+                        <span class="kp-option-name">{{ k.name }}</span>
+                        <span class="trace-confidence">{{ Math.round((k.confidence || 0) * 100) }}%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="confirmPendingKp">确认绑定</button>
+                <button class="btn" @click="showPendingKpModal=false">忽略</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 批量关联知识点 -->
+    <div class="modal" v-if="batchKpModal.show" @click.self="batchKpModal.show=false">
+        <div class="modal-body">
+            <h3>批量关联知识点</h3>
+            <div class="kp-tree">
+                <div v-for="k in knowledgePoints" :key="k.id" class="tree-node" :style="{marginLeft: k.level*20+'px'}">
+                    <div class="kp-option" :class="{selected: isBatchKpSelected(k.id)}" @click="toggleBatchKp(k.id)">
+                        <span class="kp-checkbox" :class="{checked: isBatchKpSelected(k.id)}">{{ isBatchKpSelected(k.id) ? '✓' : '' }}</span>
+                        <span class="kp-option-name">{{ k.name }}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="confirmBatchKp">确定关联</button>
+                <button class="btn" @click="batchKpModal.show=false">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识点选择器 -->
+    <div class="modal" v-if="showKpSelector" @click.self="showKpSelector=false">
+        <div class="modal-body">
+            <h3>选择知识点</h3>
+            <div class="kp-tree">
+                <div v-for="k in knowledgePoints" :key="k.id" class="tree-node" :style="{marginLeft: k.level*20+'px'}">
+                    <div class="kp-option" :class="{selected: isKpSelected(k.id)}" @click="toggleKp(k)">
+                        <span class="kp-checkbox" :class="{checked: isKpSelected(k.id)}">{{ isKpSelected(k.id) ? '✓' : '' }}</span>
+                        <span class="kp-option-name">{{ k.name }}</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="confirmKps">确定</button>
+                <button class="btn" @click="showKpSelector=false">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 错题详情/编辑弹窗 -->
+    <div class="modal" v-if="detailQuestion" @click.self="detailQuestion=null">
+        <div class="modal-body detail-modal">
+            <h3>错题详情</h3>
+            <div class="detail-content">
+                <p><strong>题干：</strong></p>
+                <div class="latex-block" v-html="renderedTitle(detailQuestion.title_text)"></div>
+                <img v-if="detailQuestion.title_image" :src="detailQuestion.title_image" class="preview-img">
+                <p><strong>正确答案：</strong>{{ detailQuestion.correct_answer }}</p>
+                <p><strong>学生答案：</strong>{{ detailQuestion.user_answer }}</p>
+                <p><strong>解析：</strong></p>
+                <div class="latex-block" v-html="renderedTitle(detailQuestion.analysis)"></div>
+                <p><strong>错误原因：</strong>{{ detailQuestion.mistake_reason }}</p>
+                <p><strong>知识点：</strong>
+                    <span class="tag" v-for="kp in detailQuestion.knowledge_points" :key="kp.id">{{ kp.name }}</span>
+                </p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="openTrace(detailQuestion)">知识溯源</button>
+                <button class="btn" @click="openMindMap(detailQuestion)">知识导图</button>
+                <button class="btn" @click="detailQuestion=null">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识溯源思维导图 -->
+    <div class="modal" v-if="mindMapModal.show" @click.self="mindMapModal.show=false">
+        <div class="modal-body edit-modal">
+            <h3>知识溯源思维导图</h3>
+            <div class="mindmap">
+                <div class="mind-node mind-question">{{ mindMapModal.map.question_text || '这道错题' }}</div>
+                <div class="mind-connector"></div>
+                <div v-if="mindMapModal.map.nodes.some(n => n.type === 'symptom')" class="mind-level">
+                    <div v-for="n in mindMapModal.map.nodes.filter(n => n.type === 'symptom')" :key="n.id" class="mind-node mind-symptom">
+                        <strong>{{ n.label }}</strong>
+                        <span>{{ n.detail }}</span>
+                    </div>
+                </div>
+                <div class="mind-connector"></div>
+                <div class="mind-section-title">直接知识点</div>
+                <div class="mind-grid">
+                    <div v-for="n in mindMapModal.map.nodes.filter(n => n.type === 'direct')" :key="n.id" class="mind-node mind-direct">
+                        <button type="button" class="mind-remove" @click="removeMindMapNode(n.id)">×</button>
+                        <strong>{{ n.label }}</strong>
+                        <small v-if="n.detail">{{ n.detail }}</small>
+                    </div>
+                    <p v-if="!mindMapModal.map.nodes.some(n => n.type === 'direct')" class="empty-tip">暂无直接知识点</p>
+                </div>
+                <div class="mind-section-title">前置知识点</div>
+                <div class="mind-grid">
+                    <div v-for="n in mindMapModal.map.nodes.filter(n => n.type === 'prerequisite')" :key="n.id" class="mind-node mind-prerequisite">
+                        <button type="button" class="mind-remove" @click="removeMindMapNode(n.id)">×</button>
+                        <strong>{{ n.label }}</strong>
+                        <small v-if="n.detail">{{ n.detail }}</small>
+                    </div>
+                    <p v-if="!mindMapModal.map.nodes.some(n => n.type === 'prerequisite')" class="empty-tip">暂无前置知识点</p>
+                </div>
+                <div class="mind-section-title">根本原因</div>
+                <div class="mind-grid">
+                    <div v-for="n in mindMapModal.map.nodes.filter(n => n.type === 'root')" :key="n.id" class="mind-node mind-root">
+                        <button type="button" class="mind-remove" @click="removeMindMapNode(n.id)">×</button>
+                        <strong>{{ n.label }}</strong>
+                        <small v-if="n.detail">{{ n.detail }}</small>
+                    </div>
+                </div>
+            </div>
+            <div class="mind-add">
+                <input type="text" v-model="mindMapModal.newLabel" placeholder="添加自定义节点">
+                <select v-model="mindMapModal.newType">
+                    <option value="direct">直接知识点</option>
+                    <option value="prerequisite">前置知识点</option>
+                    <option value="root">根本原因</option>
+                </select>
+                <button type="button" class="btn-primary" @click="addMindMapNode">添加节点</button>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="saveMindMap">保存导图</button>
+                <button class="btn" @click="mindMapModal.show=false">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义复习计划 -->
+    <div class="modal" v-if="showPlanModal" @click.self="showPlanModal=false">
+        <div class="modal-body">
+            <h3>加入复习计划</h3>
+            <p class="typical-source">{{ planQuestion && planQuestion.title_text }}</p>
+            <div class="form-row">
+                <label>复习日期</label>
+                <input type="date" v-model="planDate">
+            </div>
+            <div class="form-row">
+                <label>备注</label>
+                <input type="text" v-model="planNote" placeholder="例如：先看概念再做一遍">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="savePlanForQuestion">保存计划</button>
+                <button class="btn" @click="showPlanModal=false">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识图谱节点详情 -->
+    <div class="modal" v-if="graphDetail.show" @click.self="graphDetail.show=false">
+        <div class="modal-body edit-modal node-detail-modal">
+            <h3>{{ graphDetail.kp && graphDetail.kp.name }}</h3>
+            <p class="typical-source">{{ graphDetail.path }}</p>
+            <div class="detail-tabs">
+                <button type="button" :class="{active: graphDetail.tab==='overview'}" @click="graphDetail.tab='overview'">概览说明</button>
+                <button type="button" :class="{active: graphDetail.tab==='knowledge'}" @click="graphDetail.tab='knowledge'">知识库内容</button>
+                <button type="button" :class="{active: graphDetail.tab==='resources'}" @click="graphDetail.tab='resources'">学习资源</button>
+            </div>
+            <div class="detail-panel" v-show="graphDetail.tab==='overview'">
+                <div class="trace-block">
+                    <label>知识点说明</label>
+                    <textarea v-model="graphDetail.description" rows="6" class="ai-content" placeholder="可以自己编辑知识点说明"></textarea>
+                    <div class="review-detail-actions" style="margin-top:8px">
+                        <button type="button" class="btn-primary" @click="saveGraphDescription">保存说明</button>
+                        <button type="button" class="btn-primary" @click="generateGraphSummary" :disabled="graphDetail.aiLoading">{{ graphDetail.aiLoading ? 'AI 整理中...' : 'AI 精简知识点' }}</button>
+                        <button type="button" class="btn" v-if="graphDetail.aiContent" @click="saveGraphSummary">保存到知识库</button>
+                        <button type="button" class="btn" v-if="graphDetail.aiContent" @click="applyGraphSummaryAsDescription">设为说明</button>
+                    </div>
+                </div>
+                <textarea v-if="graphDetail.aiContent" v-model="graphDetail.aiContent" rows="10" class="ai-content"></textarea>
+            </div>
+            <div class="detail-panel" v-show="graphDetail.tab==='knowledge'">
+                <div v-if="graphDetail.materials.length" class="trace-block">
+                    <label>已保存的知识库内容</label>
+                    <details v-for="m in graphDetail.materials" :key="m.id" class="typical-item">
+                        <summary>{{ m.type === 'summary' ? '知识点精要' : m.type }}</summary>
+                        <textarea v-model="m.content" rows="8" class="ai-content" style="margin-top:8px"></textarea>
+                        <div class="review-detail-actions" style="margin-top:8px">
+                            <button type="button" class="btn-primary" @click="saveMaterialEdit(m)">保存修改</button>
+                            <button type="button" class="btn" @click="deleteMaterial(m, 'graphDetail')" style="color:#b91c1c">删除</button>
+                        </div>
+                    </details>
+                </div>
+                <div class="trace-block">
+                    <label>新增知识库内容</label>
+                    <select v-model="graphDetail.newType" class="material-type-select">
+                        <option value="custom">自定义内容</option>
+                        <option value="summary">知识点精要</option>
+                        <option value="concept">概念回顾</option>
+                        <option value="typical">典型例题</option>
+                        <option value="variant">变式练习</option>
+                    </select>
+                    <textarea v-model="graphDetail.newContent" rows="6" class="ai-content" style="margin-top:8px"></textarea>
+                    <div class="review-detail-actions" style="margin-top:8px">
+                        <button type="button" class="btn-primary" @click="createMaterial('graphDetail')">新增内容</button>
+                    </div>
+                </div>
+            </div>
+            <div class="detail-panel" v-show="graphDetail.tab==='resources'">
+                <div class="resource-section">
+                    <h4>AI 推荐</h4>
+                    <button type="button" class="btn-primary" @click="generateAiResources" :disabled="graphDetail.aiResourcesLoading">{{ graphDetail.aiResourcesLoading ? '推荐中...' : 'AI 推荐学习资源' }}</button>
+                    <div class="ai-resource-list" v-if="graphDetail.aiResources.length">
+                        <div v-for="(item, idx) in graphDetail.aiResources" :key="idx" class="ai-resource-card">
+                            <strong>{{ item.title }}</strong>
+                            <a v-if="item.type==='course' && item.url" :href="item.url" target="_blank">打开 B站搜索</a>
+                            <p v-if="item.content">{{ item.content }}</p>
+                            <button type="button" class="mini-btn" @click="saveAiResource(item)">保存到学习资源</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="resource-section">
+                    <h4>我的学习资源</h4>
+                    <p v-if="!graphDetail.resources.length" class="empty-tip">还没有学习资源，可以自己添加或使用 AI 推荐。</p>
+                    <details v-for="r in graphDetail.resources" :key="r.id" class="typical-item">
+                        <summary>{{ r.type === 'textbook' ? '教材' : r.type === 'course' ? '网课' : '笔记' }} · {{ r.title || '未命名' }}</summary>
+                        <div class="resource-grid">
+                            <select v-model="r.type">
+                                <option value="textbook">教材页码</option>
+                                <option value="course">网课链接</option>
+                                <option value="note">笔记</option>
+                            </select>
+                            <input v-model="r.title" placeholder="标题">
+                            <input v-if="r.type==='textbook'" v-model="r.page" placeholder="教材页码">
+                            <input v-if="r.type==='course'" v-model="r.url" placeholder="链接">
+                        </div>
+                        <textarea v-model="r.content" rows="3" class="ai-content" style="margin-top:8px"></textarea>
+                        <p v-if="r.attachment" class="typical-source">附件：<a :href="r.attachment" target="_blank">打开附件</a></p>
+                        <div class="review-detail-actions" style="margin-top:8px">
+                            <button type="button" class="btn-primary" @click="saveResource(r)">保存修改</button>
+                            <button type="button" class="btn" @click="deleteResource(r)" style="color:#b91c1c">删除</button>
+                        </div>
+                    </details>
+                    <h4 style="margin-top:14px">新增我的资源</h4>
+                    <div class="resource-grid">
+                        <select v-model="graphDetail.resourceForm.type">
+                            <option value="textbook">教材页码</option>
+                            <option value="course">网课链接</option>
+                            <option value="note">笔记</option>
+                        </select>
+                        <input v-model="graphDetail.resourceForm.title" placeholder="标题">
+                        <input v-if="graphDetail.resourceForm.type==='textbook'" v-model="graphDetail.resourceForm.page" placeholder="教材页码">
+                        <input v-if="graphDetail.resourceForm.type==='course'" v-model="graphDetail.resourceForm.url" placeholder="链接">
+                    </div>
+                    <textarea v-model="graphDetail.resourceForm.content" rows="3" class="ai-content" style="margin-top:8px" placeholder="笔记内容"></textarea>
+                    <div class="review-detail-actions" style="margin-top:8px">
+                        <label class="btn" style="cursor:pointer">上传附件<input type="file" hidden @change="uploadResourceAttachment"></label>
+                        <span class="typical-source" v-if="graphDetail.resourceForm.attachment">已上传附件</span>
+                        <button type="button" class="btn-primary" @click="saveResource()">新增资源</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" @click="graphDetail.show=false">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识点详情 -->
+    <div class="modal" v-if="kpDetail.show" @click.self="kpDetail.show=false">
+        <div class="modal-body edit-modal">
+            <h3>{{ kpDetail.kp && kpDetail.kp.name }}</h3>
+            <p class="typical-source">{{ kpDetail.path }}</p>
+            <div class="trace-block">
+                <label>知识点说明</label>
+                <div class="review-detail-text" v-html="latexHtml(kpDetail.kp && kpDetail.kp.description || '暂无详细说明，可以通过知识溯源或其他 AI 功能补充。')"></div>
+            </div>
+            <div class="trace-block" v-if="kpDetail.materials.length">
+                <label>已保存的 AI 内容</label>
+                <details v-for="m in kpDetail.materials" :key="m.id" class="typical-item">
+                    <summary>{{ m.type === 'concept' ? '概念回顾' : m.type === 'variant' ? '变式练习' : m.type === 'typical' ? '典型例题' : 'AI 内容' }} · {{ (m.created_at || '').slice(0, 10) }}</summary>
+                    <textarea v-model="m.content" rows="8" class="ai-content" style="margin-top:8px"></textarea>
+                    <div class="review-detail-actions" style="margin-top:8px">
+                        <button type="button" class="btn-primary" @click="saveMaterialEdit(m)">保存修改</button>
+                        <button type="button" class="btn" @click="deleteMaterial(m, 'kpDetail')" style="color:#b91c1c">删除</button>
+                    </div>
+                </details>
+            </div>
+            <div class="trace-block">
+                <label>新增知识库内容</label>
+                <select v-model="kpDetail.newType" class="material-type-select">
+                    <option value="custom">自定义内容</option>
+                    <option value="summary">知识点精要</option>
+                    <option value="concept">概念回顾</option>
+                    <option value="typical">典型例题</option>
+                    <option value="variant">变式练习</option>
+                </select>
+                <textarea v-model="kpDetail.newContent" rows="5" class="ai-content" style="margin-top:8px" placeholder="可以自己整理知识点内容、例题、笔记等"></textarea>
+                <div class="review-detail-actions" style="margin-top:8px">
+                    <button type="button" class="btn-primary" @click="createMaterial('kpDetail')">新增内容</button>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" @click="kpDetail.show=false">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 知识溯源 -->
+    <div class="modal" v-if="traceModal.show" @click.self="traceModal.show=false">
+        <div class="modal-body edit-modal">
+            <h3>知识溯源</h3>
+            <div v-if="traceModal.loading" class="ocr-status">大模型分析中，请稍候...</div>
+            <template v-else-if="traceModal.data">
+                <div class="trace-block">
+                    <label>错误表象</label>
+                    <div class="review-detail-text" v-html="latexHtml(traceModal.data.symptom)"></div>
+                </div>
+                <div class="trace-block">
+                    <label>直接知识点（勾选确认后加入知识树）</label>
+                    <label v-for="(p, idx) in (traceModal.data.direct_points || [])" :key="'d'+idx" class="trace-point">
+                        <input type="checkbox" v-model="p._selected">
+                        <span class="trace-name">{{ p.name }}</span>
+                        <span class="tag" v-if="p.exists">已有</span>
+                        <span class="tag" v-else>新增</span>
+                        <span class="trace-confidence">{{ Math.round((p.confidence || 0) * 100) }}%</span>
+                        <small>{{ p.reason }}</small>
+                    </label>
+                </div>
+                <div class="trace-block">
+                    <label>前置知识点</label>
+                    <label v-for="(p, idx) in (traceModal.data.prerequisite_points || [])" :key="'p'+idx" class="trace-point">
+                        <input type="checkbox" v-model="p._selected">
+                        <span class="trace-name">{{ p.name }}</span>
+                        <span class="tag" v-if="p.exists">已有</span>
+                        <span class="tag" v-else>新增</span>
+                        <span class="trace-confidence">{{ Math.round((p.confidence || 0) * 100) }}%</span>
+                        <small>{{ p.reason }}</small>
+                    </label>
+                </div>
+                <div class="trace-block">
+                    <label>根因分析</label>
+                    <div class="review-detail-text" v-html="latexHtml(traceModal.data.root_cause)"></div>
+                </div>
+                <div class="trace-block" v-if="traceModal.data.path && traceModal.data.path.length">
+                    <label>溯源路径</label>
+                    <div class="trace-path">{{ traceModal.data.path.join('  →  ') }}</div>
+                </div>
+            </template>
+            <div class="modal-actions">
+                <button class="btn-primary" v-if="traceModal.data" @click="confirmTrace" :disabled="traceModal.saving">{{ traceModal.saving ? '生成中...' : '生成知识溯源导图' }}</button>
+                <button class="btn" @click="traceModal.show=false">关闭</button>
+            </div>
+        </div>
+    </div>
+    </template>
+</div>
+    <script src="/static/app.js?v=20260909a"></script>
+</body>
+</html>
