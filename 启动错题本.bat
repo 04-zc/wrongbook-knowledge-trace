@@ -27,16 +27,6 @@ if errorlevel 1 (
     )
 )
 
-if not exist "data.db" (
-    echo [提示] 首次运行，正在生成演示数据...
-    python tools\seed_demo.py
-    if errorlevel 1 (
-        echo [错误] 演示数据生成失败。
-        pause
-        exit /b 1
-    )
-)
-
 echo [提示] 正在启动服务...
 start "" powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Start-Process 'http://localhost:5000'"
 echo [提示] 浏览器将自动打开 http://localhost:5000

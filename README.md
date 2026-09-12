@@ -36,17 +36,22 @@ Windows 用户可以直接双击：
 启动错题本.bat
 ```
 
-脚本会自动检查依赖、生成首次演示数据、启动服务并打开浏览器。
+脚本会自动检查依赖、启动服务并打开浏览器。
 
 命令行方式：
 
 ```bash
 pip install -r requirements.txt
-python tools/seed_demo.py
 python app.py
 ```
 
 访问：http://localhost:5000
+
+如需生成演示数据，可单独运行：
+
+```bash
+python tools/seed_demo.py
+```
 
 演示账号：
 
