@@ -5,13 +5,16 @@ if (!corePath) {
   throw new Error('缺少 PW_CORE 环境变量');
 }
 const { chromium } = require(corePath);
+const username = process.env.APP_USER || 'demo';
+const password = process.env.APP_PASSWORD || 'demo123';
+const videoDir = process.env.VIDEO_DIR || 'output/playwright/video';
 
 (async () => {
   const browser = await chromium.launch({ headless: true, channel: 'msedge' });
   const context = await browser.newContext({
     viewport: { width: 1440, height: 900 },
     recordVideo: {
-      dir: path.resolve('output/playwright/video'),
+      dir: path.resolve(videoDir),
       size: { width: 1440, height: 900 }
     }
   });
@@ -19,8 +22,8 @@ const { chromium } = require(corePath);
 
   await page.goto('http://localhost:5000/');
   await page.waitForTimeout(1000);
-  await page.getByRole('textbox', { name: '账号（英文或数字）' }).fill('demo');
-  await page.getByRole('textbox', { name: '密码（英文或数字）' }).fill('demo123');
+  await page.getByRole('textbox', { name: '账号（英文或数字）' }).fill(username);
+  await page.getByRole('textbox', { name: '密码（英文或数字）' }).fill(password);
   await page.getByRole('button', { name: '登 录' }).click();
   await page.waitForTimeout(1800);
 

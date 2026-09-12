@@ -467,7 +467,7 @@ def api_ai_generate():
     mode = body.get('mode')
     count = int(body.get('count') or 2)
     kp = db.get_kp(kp_id) if kp_id else None
-    if not kp:
+    if mode != 'explain' and not kp:
         return jsonify({'error': '知识点不存在'}), 404
     if mode == 'concept':
         prompt = f'''请针对知识点「{kp['name']}」生成概念回顾：
