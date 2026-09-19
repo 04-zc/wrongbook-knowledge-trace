@@ -313,6 +313,19 @@ def init_db():
     Base.metadata.create_all(engine)
     _migrate_legacy_schema()
     Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        for statement in [
+            'CREATE INDEX IF NOT EXISTS idx_questions_user_deleted ON questions(user_id, deleted_at)',
+            'CREATE INDEX IF NOT EXISTS idx_questions_user_deleted_created ON questions(user_id, deleted_at, created_at DESC)',
+            'CREATE INDEX IF NOT EXISTS idx_questions_subject_status ON questions(subject_id, status)',
+            'CREATE INDEX IF NOT EXISTS idx_questions_user_subject_status ON questions(user_id, subject_id, status, deleted_at)',
+            'CREATE INDEX IF NOT EXISTS idx_questions_created ON questions(created_at)',
+            'CREATE INDEX IF NOT EXISTS idx_question_kp_kp ON question_kp(kp_id, question_id)',
+            'CREATE INDEX IF NOT EXISTS idx_kp_subject_parent ON knowledge_points(subject_id, parent_id)',
+            'CREATE INDEX IF NOT EXISTS idx_review_logs_question ON review_logs(question_id)',
+            'CREATE INDEX IF NOT EXISTS idx_review_plans_user_date ON review_plans(user_id, plan_date, status)'
+        ]:
+            conn.execute(text(statement))
 
 # ---------- users ----------
 def count_users():
@@ -547,7 +560,7 @@ def update_kp_description(kid, description):
     return True
 
 # ---------- questions ----------
-def list_questions(subject_id=None, status=None, kp_id=None):
+def list_questions(subject_id=None, status=None, kp_id=None, keyword=None, limit=None, offset=None):
     uid = current_user_id()
     session = get_session()
     q = select(Question).options(joinedload(Question.subject), joinedload(Question.kp_links).joinedload(QuestionKP.knowledge_point))
@@ -558,10 +571,35 @@ def list_questions(subject_id=None, status=None, kp_id=None):
         q = q.where(Question.status == status)
     if kp_id:
         q = q.join(QuestionKP).where(QuestionKP.kp_id == kp_id)
+    if keyword:
+        q = q.where(Question.title_text.like(f'%{keyword}%'))
     q = q.order_by(Question.created_at.desc())
+    if offset:
+        q = q.offset(offset)
+    if limit:
+        q = q.limit(limit)
     rows = session.execute(q).unique().scalars().all()
     session.close()
     return [r.to_dict() for r in rows]
+
+def count_questions(subject_id=None, status=None, kp_id=None, keyword=None):
+    uid = current_user_id()
+    session = get_session()
+    q = select(func.count(func.distinct(Question.id))).select_from(Question).where(
+        Question.user_id == uid,
+        Question.deleted_at.is_(None)
+    )
+    if subject_id:
+        q = q.where(Question.subject_id == subject_id)
+    if status is not None:
+        q = q.where(Question.status == status)
+    if kp_id:
+        q = q.join(QuestionKP).where(QuestionKP.kp_id == kp_id)
+    if keyword:
+        q = q.where(Question.title_text.like(f'%{keyword}%'))
+    count = session.execute(q).scalar() or 0
+    session.close()
+    return count
 
 def get_question(qid):
     uid = current_user_id()

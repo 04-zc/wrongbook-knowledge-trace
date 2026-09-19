@@ -600,6 +600,36 @@ body {
 .batch-toolbar select { padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; }
 .q-check-title { display: flex; align-items: flex-start; gap: 9px; }
 .q-check-title input { margin-top: 6px; }
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 18px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #f8fafc;
+}
+.pagination-summary {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-right: 4px;
+}
+.pagination .page-number {
+    min-width: 38px;
+    padding: 6px 9px;
+}
+.pagination .page-number.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #ffffff;
+}
+.pagination .btn-sm:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
 .typical-list { display: flex; flex-direction: column; gap: 8px; max-height: 40vh; overflow-y: auto; }
 .typical-item {
     border: 1px solid var(--border);
@@ -966,6 +996,13 @@ body {
     padding: 14px 16px;
 }
 .plan-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.plan-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.plan-actions input[type="time"] {
+    min-height: 40px;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
 .plan-head h3 { margin: 0; }
 .plan-counts { margin: 4px 0 0; color: var(--muted); font-size: 0.85rem; }
 .plan-alert {

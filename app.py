@@ -9,10 +9,11 @@ import requests
 import docx
 from PyPDF2 import PdfReader
 import fitz
-from flask import Flask, request, jsonify, send_from_directory, session, send_file
+from flask import Flask, request, jsonify, send_from_directory, session, send_file, Response, stream_with_context
 from werkzeug.security import generate_password_hash, check_password_hash
 
 import db
+import report_export
 
 try:
     from paddleocr import PaddleOCR
@@ -55,7 +56,11 @@ else:
 @app.before_request
 def require_login():
     # 静态资源、首页与登录接口不拦截
-    if request.path.startswith('/static/') or request.path.startswith('/uploads/') or request.path == '/':
+    if (
+        request.path.startswith('/static/')
+        or request.path.startswith('/uploads/')
+        or request.path in ('/', '/manifest.webmanifest', '/sw.js')
+    ):
         return None
     if request.path.startswith('/api/auth/'):
         return None
@@ -146,6 +151,46 @@ def call_llm(prompt, json_mode=False):
     }, timeout=60)
     resp.raise_for_status()
     return resp.json()['choices'][0]['message']['content']
+
+def call_llm_stream(prompt):
+    api_key = db.get_setting('llm_api_key', '')
+    model = db.get_setting('llm_model', 'deepseek-chat')
+    if not api_key:
+        raise RuntimeError('未配置大模型 API Key，请点击右上角「大模型配置」填写')
+    if 'deepseek' in model:
+        url = 'https://api.deepseek.com/chat/completions'
+        payload = {
+            'model': model or 'deepseek-chat',
+            'messages': [{'role': 'user', 'content': prompt}],
+            'temperature': 0.4,
+            'stream': True
+        }
+    else:
+        url = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+        payload = {
+            'model': model or 'qwen-turbo',
+            'messages': [{'role': 'user', 'content': prompt}],
+            'temperature': 0.4,
+            'stream': True
+        }
+    resp = requests.post(url, json=payload, headers={
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {api_key}'
+    }, stream=True, timeout=120)
+    resp.raise_for_status()
+    for raw_line in resp.iter_lines(decode_unicode=True):
+        if not raw_line or not raw_line.startswith('data:'):
+            continue
+        data = raw_line[5:].strip()
+        if data == '[DONE]':
+            break
+        try:
+            chunk = json.loads(data)
+            delta = chunk.get('choices', [{}])[0].get('delta', {}).get('content')
+            if delta:
+                yield delta
+        except Exception:
+            continue
 
 def classify_recommendations(recs):
     boost = db.feedback_boost_map()
@@ -300,7 +345,7 @@ def auth_me():
     if not u:
         session.clear()
         return jsonify({'user': None}), 401
-    return jsonify({'user': {'username': u['username']}})
+    return jsonify({'user': {'id': u['id'], 'username': u['username']}})
 
 @app.route('/api/auth/register', methods=['POST'])
 def auth_register():
@@ -320,7 +365,7 @@ def auth_register():
         db.claim_legacy_data(u['id'])
     session['user_id'] = u['id']
     session['username'] = u['username']
-    return jsonify({'user': {'username': u['username']}})
+    return jsonify({'user': {'id': u['id'], 'username': u['username']}})
 
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
@@ -336,7 +381,7 @@ def auth_login():
     session['user_id'] = u['id']
     session['username'] = u['username']
     db.set_current_user(u['id'])
-    return jsonify({'user': {'username': u['username']}})
+    return jsonify({'user': {'id': u['id'], 'username': u['username']}})
 
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
@@ -401,6 +446,17 @@ def auth_delete_account():
 @app.route('/')
 def index():
     return send_from_directory(STATIC_DIR, 'index.html')
+
+@app.route('/manifest.webmanifest')
+def manifest():
+    return send_from_directory(STATIC_DIR, 'manifest.webmanifest', mimetype='application/manifest+json')
+
+@app.route('/sw.js')
+def service_worker():
+    resp = send_from_directory(STATIC_DIR, 'sw.js', mimetype='application/javascript')
+    resp.headers['Service-Worker-Allowed'] = '/'
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
 
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
@@ -547,6 +603,59 @@ def api_ai_generate():
     except Exception as e:
         return jsonify({'error': f'生成失败：{e}'}), 500
 
+@app.route('/api/ai/stream', methods=['POST'])
+def api_ai_stream():
+    body = request.get_json(force=True, silent=True) or {}
+    mode = body.get('mode')
+    kp_id = body.get('kp_id')
+    kp = db.get_kp(kp_id) if kp_id else None
+    if not db.get_setting('llm_api_key', ''):
+        return jsonify({'error': '未配置大模型 API Key，请先在右上角「模型与 OCR 配置」填写'}), 400
+    if mode in ('concept', 'summary') and not kp:
+        return jsonify({'error': '知识点不存在'}), 404
+    if mode == 'concept':
+        prompt = f'''请针对知识点「{kp['name']}」生成概念回顾：
+1. 用 200 字左右概括核心概念和公式。
+2. 列出 3 个易错点。
+直接输出内容，不要多余说明。''' + MATH_STYLE
+    elif mode == 'summary':
+        prompt = f'''请把知识点「{kp['name']}」整理成一份精简、可直接用于复习的知识卡片：
+1. 核心概念，不超过 100 字。
+2. 必背公式或定律。
+3. 最常见题型的解题方法，写成步骤。
+4. 2 到 3 个易错点。
+要求去重、去废话，只保留最有用的内容，直接输出。''' + MATH_STYLE
+    elif mode == 'explain':
+        q = db.get_question(body.get('question_id'))
+        if not q:
+            return jsonify({'error': '错题不存在'}), 404
+        prompt = f'''请讲解下面这道错题，输出：
+1. 这道题考查的知识点
+2. 正确的解题步骤
+3. 学生容易错在哪里
+4. 同类题的解题提醒
+
+题目：{q['title_text']}
+正确答案：{q.get('correct_answer') or '未填写'}
+学生答案：{q.get('user_answer') or '未填写'}
+已有解析：{q.get('analysis') or '无'}''' + MATH_STYLE
+    else:
+        return jsonify({'error': '该模式暂不支持流式输出'}), 400
+
+    def generate():
+        try:
+            for delta in call_llm_stream(prompt):
+                yield 'data: ' + json.dumps({'delta': delta}, ensure_ascii=False) + '\n\n'
+            yield 'data: [DONE]\n\n'
+        except Exception as exc:
+            yield 'data: ' + json.dumps({'error': str(exc)}, ensure_ascii=False) + '\n\n'
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )
+
 @app.route('/api/ai/save', methods=['POST'])
 def api_ai_save():
     body = request.get_json(force=True, silent=True) or {}
@@ -649,6 +758,30 @@ def api_report_summary():
         'trend': trend
     })
 
+@app.route('/api/reports/export/word', methods=['GET'])
+def api_export_report_word():
+    subject_id = request.args.get('subject_id', type=int)
+    data = report_export.collect_report(subject_id)
+    buffer = report_export.build_word(data)
+    return send_file(
+        buffer,
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment=True,
+        download_name='wrongbook_report.docx'
+    )
+
+@app.route('/api/reports/export/pdf', methods=['GET'])
+def api_export_report_pdf():
+    subject_id = request.args.get('subject_id', type=int)
+    data = report_export.collect_report(subject_id)
+    buffer = report_export.build_pdf(data)
+    return send_file(
+        buffer,
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name='wrongbook_report.pdf'
+    )
+
 # subjects
 @app.route('/api/subjects', methods=['GET'])
 def api_subjects():
@@ -734,6 +867,31 @@ def api_questions():
         status=request.args.get('status', type=int),
         kp_id=request.args.get('kp_id', type=int)
     ))
+
+@app.route('/api/questions/page', methods=['GET'])
+def api_questions_page():
+    page = max(request.args.get('page', 1, type=int), 1)
+    page_size = min(max(request.args.get('page_size', 20, type=int), 1), 100)
+    subject_id = request.args.get('subject_id', type=int)
+    status = request.args.get('status', type=int)
+    kp_id = request.args.get('kp_id', type=int)
+    keyword = request.args.get('keyword', '').strip()
+    total = db.count_questions(subject_id=subject_id, status=status, kp_id=kp_id, keyword=keyword)
+    items = db.list_questions(
+        subject_id=subject_id,
+        status=status,
+        kp_id=kp_id,
+        keyword=keyword,
+        limit=page_size,
+        offset=(page - 1) * page_size
+    )
+    return jsonify({
+        'items': items,
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+        'pages': max((total + page_size - 1) // page_size, 1)
+    })
 
 @app.route('/api/questions', methods=['POST'])
 def api_add_question():
@@ -1065,6 +1223,45 @@ def api_delete_review_plan(pid):
     db.delete_review_plan(pid)
     return jsonify({'ok': True})
 
+@app.route('/api/review/plans/export.ics', methods=['GET'])
+def api_export_review_ics():
+    plans = [p for p in db.list_review_plans() if p.get('status') == 'pending']
+    lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Wrongbook//Review Plans//CN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH',
+        'X-WR-CALNAME:错题本复习计划'
+    ]
+    for plan in plans:
+        date_value = (plan.get('plan_date') or '').replace('-', '')
+        if not date_value:
+            continue
+        summary = '复习错题：' + (plan.get('question_text') or '')
+        description = plan.get('note') or '错题本复习计划'
+        lines.extend([
+            'BEGIN:VEVENT',
+            f'UID:wrongbook-plan-{plan["id"]}@localhost',
+            f'DTSTART;VALUE=DATE:{date_value}',
+            f'SUMMARY:{summary}',
+            f'DESCRIPTION:{description}',
+            'BEGIN:VALARM',
+            'TRIGGER:-PT30M',
+            'ACTION:DISPLAY',
+            f'DESCRIPTION:{summary}',
+            'END:VALARM',
+            'END:VEVENT'
+        ])
+    lines.append('END:VCALENDAR')
+    content = '\r\n'.join(lines) + '\r\n'
+    return send_file(
+        io.BytesIO(content.encode('utf-8')),
+        mimetype='text/calendar; charset=utf-8',
+        as_attachment=True,
+        download_name='wrongbook_review_plans.ics'
+    )
+
 @app.route('/api/kp_tree', methods=['GET'])
 def api_kp_tree():
     subject_id = request.args.get('subject_id', type=int)
@@ -1083,7 +1280,9 @@ def api_get_settings():
         'ocr_use_orientation': db.get_setting('ocr_use_orientation', 'true'),
         'ocr_confidence_threshold': db.get_setting('ocr_confidence_threshold', '0.5'),
         'kp_auto_threshold': db.get_setting('kp_auto_threshold', '0.8'),
-        'kp_pending_threshold': db.get_setting('kp_pending_threshold', '0.5')
+        'kp_pending_threshold': db.get_setting('kp_pending_threshold', '0.5'),
+        'reminder_enabled': db.get_setting('reminder_enabled', 'false'),
+        'reminder_time': db.get_setting('reminder_time', '20:00')
     })
 
 @app.route('/api/settings', methods=['POST'])

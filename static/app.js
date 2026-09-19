@@ -27,6 +27,27 @@ function emptyForm() {
     };
 }
 
+function sendServiceWorkerMessage(message) {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.ready
+        .then(registration => {
+            const worker = registration.active || registration.waiting || registration.installing;
+            if (worker) worker.postMessage(message);
+        })
+        .catch(() => {});
+}
+
+function setCachedUserId(userId) {
+    if (!userId) return;
+    localStorage.setItem('wrongbook_user_id', String(userId));
+    sendServiceWorkerMessage({ type: 'SET_USER', userId: String(userId) });
+}
+
+function clearCachedUserId() {
+    localStorage.removeItem('wrongbook_user_id');
+    sendServiceWorkerMessage({ type: 'CLEAR_USER' });
+}
+
 const appOptions = {
     data() {
         return {
@@ -55,6 +76,13 @@ const appOptions = {
             subjects: [],
             knowledgePoints: [],
             questions: [],
+            dashboardStats: { total: 0, unmastered: 0 },
+            libraryItems: [],
+            libraryPage: 1,
+            libraryPageSize: 20,
+            libraryTotal: 0,
+            libraryPages: 1,
+            libraryLoading: false,
             trashMode: false,
             trashQuestions: [],
             weakPoints: [],
@@ -66,7 +94,9 @@ const appOptions = {
                 ocr_use_orientation: 'true',
                 ocr_confidence_threshold: '0.5',
                 kp_auto_threshold: '0.8',
-                kp_pending_threshold: '0.5'
+                kp_pending_threshold: '0.5',
+                reminder_enabled: 'false',
+                reminder_time: '20:00'
             },
             pendingKps: [],
             showPendingKpModal: false,
@@ -133,7 +163,7 @@ const appOptions = {
                 confirm_password: '',
                 delete_password: ''
             },
-            resetForm: { username: '', new_password: '', confirm_password: '' },
+            resetPasswordForm: { username: '', new_password: '', confirm_password: '' },
             showKpSelector: false,
             selectedKps: [],
             detailQuestion: null,
@@ -157,17 +187,19 @@ const appOptions = {
     },
     computed: {
         unmasteredCount() {
-            return this.questions.filter(q => q.status === 0).length;
+            return this.dashboardStats.unmastered;
         },
         recentQuestions() {
-            return this.questions.slice(0, 5);
+            return this.questions;
         },
-        filteredQuestions() {
-            let list = this.questions;
-            if (this.filter.keyword) {
-                list = list.filter(q => (q.title_text || '').includes(this.filter.keyword));
-            }
-            return list;
+        allLibraryPageSelected() {
+            return this.libraryItems.length > 0 && this.selectedQuestionIds.length === this.libraryItems.length;
+        },
+        libraryPageNumbers() {
+            const total = this.libraryPages;
+            if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+            const start = Math.min(Math.max(this.libraryPage - 3, 1), total - 6);
+            return Array.from({ length: 7 }, (_, i) => start + i);
         },
         filterKps() {
             if (!this.filter.subject_id) return [];
@@ -299,10 +331,15 @@ const appOptions = {
         async bootstrap() {
             this.loading = true;
             this.authUser = null;
+            const cachedUserId = localStorage.getItem('wrongbook_user_id');
+            if (cachedUserId) {
+                sendServiceWorkerMessage({ type: 'SET_USER', userId: cachedUserId });
+            }
             try {
                 const res = await axios.get('/api/auth/me');
                 if (res.data.user) {
                     this.authUser = res.data.user;
+                    setCachedUserId(this.authUser.id);
                     await this.init();
                 }
             } catch (e) {
@@ -338,6 +375,7 @@ const appOptions = {
                 const url = this.authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
                 const res = await axios.post(url, { username, password });
                 this.authUser = res.data.user;
+                setCachedUserId(this.authUser.id);
                 this.authUsername = '';
                 this.authPassword = '';
                 this.authConfirm = '';
@@ -352,6 +390,7 @@ const appOptions = {
         },
         async switchUser() {
             this.mobileMenuOpen = false;
+            clearCachedUserId();
             try {
                 await axios.post('/api/auth/logout');
             } catch (e) {
@@ -418,6 +457,7 @@ const appOptions = {
             if (!confirm('删除账号会清空所有错题、知识树和学习记录，且无法恢复，确定继续？')) return;
             try {
                 await axios.delete('/api/auth/account', { data: { password: this.accountForm.delete_password } });
+                clearCachedUserId();
                 this.showAccountModal = false;
                 this.authUser = null;
                 alert('账号已删除');
@@ -439,6 +479,7 @@ const appOptions = {
                 await this.loadSubjects();
                 await this.loadKnowledgePoints();
                 await this.loadQuestions();
+                await this.loadLibraryPage();
                 await this.loadWeak();
                 await this.loadGraph();
             } catch (e) {
@@ -459,6 +500,7 @@ const appOptions = {
                 await this.loadSubjects();
                 await this.loadKnowledgePoints();
                 await this.loadQuestions();
+                await this.loadLibraryPage();
                 await this.loadWeak();
                 await this.loadGraph();
                 await this.loadReport();
@@ -467,18 +509,18 @@ const appOptions = {
             }
         },
         openResetModal() {
-            this.resetForm = { username: '', new_password: '', confirm_password: '' };
+            this.resetPasswordForm = { username: '', new_password: '', confirm_password: '' };
             this.showResetModal = true;
         },
         async resetPassword() {
-            if (this.resetForm.new_password !== this.resetForm.confirm_password) {
+            if (this.resetPasswordForm.new_password !== this.resetPasswordForm.confirm_password) {
                 alert('两次输入的密码不一致');
                 return;
             }
             try {
                 await axios.post('/api/auth/reset_password', {
-                    username: this.resetForm.username,
-                    new_password: this.resetForm.new_password
+                    username: this.resetPasswordForm.username,
+                    new_password: this.resetPasswordForm.new_password
                 });
                 this.showResetModal = false;
                 alert('密码已重置，请使用新密码登录');
@@ -500,6 +542,7 @@ const appOptions = {
                 this.trashMode = false;
             }
             this.currentNav = key;
+            if (key === 'library') this.loadLibraryPage();
         },
         isNavActive(nav) {
             if (nav.key === 'trash') return this.currentNav === 'library' && this.trashMode;
@@ -521,12 +564,14 @@ const appOptions = {
                 }
                 await this.loadKnowledgePoints();
                 await this.loadQuestions();
+                await this.loadLibraryPage();
                 await this.loadWeak();
                 await this.loadReview();
                 await this.loadReviewPlans();
                 await this.loadGraph();
                 await this.loadReport();
                 await this.loadSettings();
+                this.setupReminderTimer();
                 this.$nextTick(() => this.renderMath());
             } catch (e) {
                 this.error = '数据加载失败：' + (e.message || e);
@@ -544,14 +589,59 @@ const appOptions = {
             this.knowledgePoints = res.data;
         },
         async loadQuestions() {
-            const params = {};
-            if (this.filter.subject_id) params.subject_id = this.filter.subject_id;
-            if (this.filter.status !== null) params.status = this.filter.status;
-            if (this.filter.kp_id) params.kp_id = this.filter.kp_id;
-            const res = await axios.get('/api/questions', { params });
-            this.questions = res.data;
-            this.selectedQuestionIds = [];
+            const [recentRes, unmasteredRes] = await Promise.all([
+                axios.get('/api/questions/page', { params: { page: 1, page_size: 5 } }),
+                axios.get('/api/questions/page', { params: { page: 1, page_size: 1, status: 0 } })
+            ]);
+            this.questions = recentRes.data.items || [];
+            this.dashboardStats = {
+                total: recentRes.data.total || 0,
+                unmastered: unmasteredRes.data.total || 0
+            };
             this.$nextTick(() => this.renderMath());
+        },
+        async loadLibraryPage() {
+            this.libraryLoading = true;
+            try {
+                const params = {
+                    page: this.libraryPage,
+                    page_size: this.libraryPageSize
+                };
+                if (this.filter.subject_id) params.subject_id = this.filter.subject_id;
+                if (this.filter.status !== null) params.status = this.filter.status;
+                if (this.filter.kp_id) params.kp_id = this.filter.kp_id;
+                if (this.filter.keyword) params.keyword = this.filter.keyword;
+                const res = await axios.get('/api/questions/page', { params });
+                this.libraryItems = res.data.items || [];
+                this.libraryTotal = res.data.total || 0;
+                this.libraryPages = res.data.pages || 1;
+                this.libraryPage = res.data.page || 1;
+                if (this.libraryPage > this.libraryPages) {
+                    this.libraryPage = this.libraryPages;
+                    return await this.loadLibraryPage();
+                }
+                this.selectedQuestionIds = [];
+                this.$nextTick(() => this.renderMath());
+            } finally {
+                this.libraryLoading = false;
+            }
+        },
+        onLibrarySearch() {
+            if (this._librarySearchTimer) clearTimeout(this._librarySearchTimer);
+            this._librarySearchTimer = setTimeout(() => {
+                this.libraryPage = 1;
+                this.loadLibraryPage();
+            }, 300);
+        },
+        onLibraryFilterChange() {
+            this.libraryPage = 1;
+            this.loadLibraryPage();
+        },
+        goLibraryPage(page) {
+            if (page < 1 || page > this.libraryPages || page === this.libraryPage) return;
+            this.libraryPage = page;
+            this.loadLibraryPage();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         },
         async loadWeak() {
             const sid = this.weakFilter.subject_id;
@@ -594,6 +684,56 @@ const appOptions = {
             const res = await axios.get('/api/review/plans');
             this.reviewPlans = res.data.plans || [];
             this.reviewPlanCounts = res.data.counts || { today: 0, overdue: 0, total: 0 };
+        },
+        async requestReminderPermission() {
+            if (!window.isSecureContext) {
+                alert('浏览器通知需要 HTTPS 或 localhost。手机通过局域网 IP 访问时，请优先使用「导出日历」把复习计划加入手机日历。');
+                return;
+            }
+            if (!('Notification' in window)) {
+                alert('当前浏览器不支持系统通知，请使用手机日历导入复习计划。');
+                return;
+            }
+            let permission = Notification.permission;
+            if (permission === 'default') {
+                permission = await Notification.requestPermission();
+            }
+            if (permission === 'granted') {
+                this.settings.reminder_enabled = 'true';
+                await this.saveReminderSettings();
+                this.checkReminder(true);
+                alert('浏览器复习提醒已开启');
+            } else {
+                alert('未获得通知权限，可在浏览器设置中重新开启。');
+            }
+        },
+        async saveReminderSettings() {
+            await axios.post('/api/settings', {
+                reminder_enabled: this.settings.reminder_enabled,
+                reminder_time: this.settings.reminder_time
+            });
+        },
+        setupReminderTimer() {
+            if (this._reminderTimer) clearInterval(this._reminderTimer);
+            this.checkReminder();
+            this._reminderTimer = setInterval(() => this.checkReminder(), 60000);
+        },
+        checkReminder(force = false) {
+            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            if (this.settings.reminder_enabled !== 'true') return;
+            const now = new Date();
+            const current = now.toTimeString().slice(0, 5);
+            if (!force && current < (this.settings.reminder_time || '20:00')) return;
+            if (!this.reviewPlanCounts.total) return;
+            const todayKey = now.toISOString().slice(0, 10);
+            if (localStorage.getItem('wrongbook_reminder_date') === todayKey) return;
+            localStorage.setItem('wrongbook_reminder_date', todayKey);
+            const overdue = this.reviewPlanCounts.overdue || 0;
+            const today = this.reviewPlanCounts.today || 0;
+            new Notification('错题本复习提醒', {
+                body: `今天有 ${today} 条待复习计划${overdue ? `，另有 ${overdue} 条已逾期` : ''}`,
+                icon: '/static/icons/icon-192.png'
+            });
         },
         async generateTodayPlans() {
             if (!confirm('根据当前薄弱知识点自动生成今日复习计划？')) return;
@@ -854,11 +994,14 @@ const appOptions = {
             if (!this.ensureApiKey()) return;
             this.graphDetail.aiLoading = true;
             try {
-                const res = await axios.post('/api/ai/generate', {
+                this.graphDetail.aiContent = '';
+                await this.streamAi({
                     kp_id: this.graphDetail.kp.id,
                     mode: 'summary'
+                }, delta => {
+                    this.graphDetail.aiContent += delta;
                 });
-                this.graphDetail.aiContent = this.humanizeMath(res.data.content || '');
+                this.graphDetail.aiContent = this.humanizeMath(this.graphDetail.aiContent);
             } catch (err) {
                 alert((err.response && err.response.data && err.response.data.error) || '生成失败');
             } finally {
@@ -1023,11 +1166,14 @@ const appOptions = {
             if (!this.ensureApiKey()) return;
             this.reviewAiLoading = true;
             try {
-                const res = await axios.post('/api/ai/generate', {
+                this.reviewAiContent = '';
+                await this.streamAi({
                     mode: 'explain',
                     question_id: this.reviewSelectedQuestion.id
+                }, delta => {
+                    this.reviewAiContent += delta;
                 });
-                this.reviewAiContent = this.humanizeMath(res.data.content || '');
+                this.reviewAiContent = this.humanizeMath(this.reviewAiContent);
             } catch (err) {
                 alert((err.response && err.response.data && err.response.data.error) || 'AI 解答失败');
             } finally {
@@ -1218,9 +1364,10 @@ const appOptions = {
                 });
                 alert(`成功导入 ${res.data.saved} 道题`);
                 this.cancelImport();
-                await this.loadQuestions();
-                await this.loadWeak();
                 this.currentNav = 'library';
+                await this.loadQuestions();
+                await this.loadLibraryPage();
+                await this.loadWeak();
             } catch (err) {
                 alert((err.response && err.response.data && err.response.data.error) || '导入失败');
             }
@@ -1502,10 +1649,58 @@ const appOptions = {
             }
             return false;
         },
+        async streamAi(payload, onDelta) {
+            const response = await fetch('/api/ai/stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!response.ok) {
+                let message = '生成失败';
+                try {
+                    const data = await response.json();
+                    message = data.error || message;
+                } catch (e) {
+                    // 保留默认错误信息
+                }
+                throw new Error(message);
+            }
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+            let buffer = '';
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                let boundary;
+                while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+                    const block = buffer.slice(0, boundary);
+                    buffer = buffer.slice(boundary + 2);
+                    const line = block.split('\n').find(item => item.startsWith('data:'));
+                    if (!line) continue;
+                    const data = line.slice(5).trim();
+                    if (data === '[DONE]') return;
+                    const parsed = JSON.parse(data);
+                    if (parsed.error) throw new Error(parsed.error);
+                    if (parsed.delta) onDelta(parsed.delta);
+                }
+            }
+        },
         async generateAiMaterial() {
             if (!this.aiModal.kp) return;
             this.aiLoading = true;
             try {
+                if (this.aiModal.mode === 'concept') {
+                    this.aiModal.content = '';
+                    await this.streamAi({
+                        kp_id: this.aiModal.kp.id,
+                        mode: 'concept'
+                    }, delta => {
+                        this.aiModal.content += delta;
+                    });
+                    this.aiModal.content = this.humanizeMath(this.aiModal.content);
+                    return;
+                }
                 const res = await axios.post('/api/ai/generate', {
                     kp_id: this.aiModal.kp.id,
                     mode: this.aiModal.mode,
@@ -1554,6 +1749,7 @@ const appOptions = {
             alert('保存成功');
             this.resetForm();
             await this.loadQuestions();
+            await this.loadLibraryPage();
             await this.loadWeak();
             this.currentNav = 'library';
         },
@@ -1665,6 +1861,7 @@ const appOptions = {
             this.showEditModal = false;
             this.form = this.emptyForm();
             await this.loadQuestions();
+            await this.loadLibraryPage();
             await this.loadWeak();
             alert('修改已保存');
         },
@@ -1672,11 +1869,12 @@ const appOptions = {
             if (!confirm('确定把这道错题移入回收站？')) return;
             await axios.delete(`/api/questions/${q.id}`);
             await this.loadQuestions();
+            await this.loadLibraryPage();
             await this.loadWeak();
         },
         onFilterSubjectChange() {
             this.filter.kp_id = null;
-            this.loadQuestions();
+            this.onLibraryFilterChange();
         },
         toggleQuestionSelect(qid) {
             const idx = this.selectedQuestionIds.indexOf(qid);
@@ -1684,7 +1882,7 @@ const appOptions = {
             else this.selectedQuestionIds.push(qid);
         },
         toggleSelectAllQuestions() {
-            const ids = this.filteredQuestions.map(q => q.id);
+            const ids = this.libraryItems.map(q => q.id);
             this.selectedQuestionIds = this.selectedQuestionIds.length === ids.length ? [] : ids;
         },
         async batchDeleteQuestions() {
@@ -1695,6 +1893,7 @@ const appOptions = {
             if (!confirm(`确认把选中的 ${this.selectedQuestionIds.length} 道错题移入回收站？`)) return;
             await axios.post('/api/questions/batch', { action: 'delete', ids: this.selectedQuestionIds });
             await this.loadQuestions();
+            await this.loadLibraryPage();
             await this.loadWeak();
             this.batchAction = '';
             alert('已移入回收站');
@@ -1720,6 +1919,7 @@ const appOptions = {
                 status: this.batchStatus
             });
             await this.loadQuestions();
+            await this.loadLibraryPage();
             await this.loadWeak();
             this.batchAction = '';
             alert('状态已更新');
@@ -1750,6 +1950,7 @@ const appOptions = {
             this.batchKpModal.show = false;
             this.batchAction = '';
             await this.loadQuestions();
+            await this.loadLibraryPage();
             await this.loadWeak();
             alert('知识点已关联');
         },
@@ -1759,7 +1960,7 @@ const appOptions = {
         },
         async closeTrash() {
             this.trashMode = false;
-            await this.loadQuestions();
+            await this.loadLibraryPage();
         },
         async restoreQuestion(q) {
             if (!confirm('确定恢复这道错题？')) return;
@@ -2012,3 +2213,11 @@ const app = createApp(appOptions);
 window.appInstance = app;
 app.mount('#app');
 console.log('错题本前端已加载');
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(err => {
+            console.warn('Service Worker 注册失败', err);
+        });
+    });
+}

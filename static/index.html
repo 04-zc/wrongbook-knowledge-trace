@@ -3,8 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="错题本助手">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+    <link rel="icon" href="/static/icons/icon-192.png">
     <title>错题本知识溯源整理助手</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260909a">
+    <link rel="stylesheet" href="/static/style.css?v=20260919a">
     <script src="/static/vue.global.js"></script>
     <script src="/static/axios.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -81,7 +89,7 @@
             <div class="cards">
                 <div class="card">
                     <div class="card-title">总错题数</div>
-                    <div class="card-value">{{ questions.length }}</div>
+                    <div class="card-value">{{ dashboardStats.total }}</div>
                 </div>
                 <div class="card">
                     <div class="card-title">未掌握</div>
@@ -200,23 +208,23 @@
                         <option :value="null">全部学科</option>
                         <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
                     </select>
-                    <select v-model.number="filter.kp_id" @change="loadQuestions">
+                    <select v-model.number="filter.kp_id" @change="onLibraryFilterChange">
                         <option :value="null">全部知识点</option>
                         <option v-for="k in filterKps" :key="k.id" :value="k.id">{{ '　'.repeat(k.level) }}{{ k.name }}</option>
                     </select>
-                    <select v-model.number="filter.status" @change="loadQuestions">
+                    <select v-model.number="filter.status" @change="onLibraryFilterChange">
                         <option :value="null">全部状态</option>
                         <option :value="0">未掌握</option>
                         <option :value="1">已掌握</option>
                         <option :value="2">已复习</option>
                         <option :value="3">已归档</option>
                     </select>
-                    <input type="text" v-model="filter.keyword" placeholder="搜索题干" @input="loadQuestions">
+                    <input type="text" v-model="filter.keyword" placeholder="搜索题干" @input="onLibrarySearch">
                 </div>
                 <div class="batch-toolbar">
                     <label class="batch-check">
-                        <input type="checkbox" :checked="selectedQuestionIds.length > 0 && selectedQuestionIds.length === filteredQuestions.length" @change="toggleSelectAllQuestions">
-                        全选（已选 {{ selectedQuestionIds.length }} 题）
+                        <input type="checkbox" :checked="allLibraryPageSelected" @change="toggleSelectAllQuestions">
+                        全选本页（已选 {{ selectedQuestionIds.length }} 题）
                     </label>
                     <select v-model="batchAction" @change="handleBatchAction">
                         <option value="">选择操作</option>
@@ -235,7 +243,9 @@
                     </template>
                 </div>
                 <div class="question-list">
-                    <div class="q-item" v-for="q in filteredQuestions" :key="q.id">
+                    <p v-if="libraryLoading" class="empty-tip">正在加载错题...</p>
+                    <p v-else-if="!libraryItems.length" class="empty-tip">当前筛选条件下没有错题。</p>
+                    <div class="q-item" v-for="q in libraryItems" :key="q.id">
                         <div class="q-check-title">
                             <input type="checkbox" :checked="selectedQuestionIds.includes(q.id)" @change="toggleQuestionSelect(q.id)">
                             <div class="q-title" @click="openQuestion(q)">{{ q.title_text || '(无标题)' }}</div>
@@ -250,6 +260,19 @@
                             <button type="button" @click="deleteQuestion(q)" style="background:#dc2626;color:#ffffff;border:2px solid #991b1b;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;cursor:pointer">删除</button>
                         </div>
                     </div>
+                </div>
+                <div class="pagination" v-if="!libraryLoading && libraryTotal > 0">
+                    <span class="pagination-summary">共 {{ libraryTotal }} 题 · 第 {{ libraryPage }} / {{ libraryPages }} 页</span>
+                    <button type="button" class="btn-sm" :disabled="libraryPage <= 1" @click="goLibraryPage(libraryPage - 1)">上一页</button>
+                    <button
+                        type="button"
+                        class="btn-sm page-number"
+                        :class="{active: page === libraryPage}"
+                        v-for="page in libraryPageNumbers"
+                        :key="page"
+                        @click="goLibraryPage(page)"
+                    >{{ page }}</button>
+                    <button type="button" class="btn-sm" :disabled="libraryPage >= libraryPages" @click="goLibraryPage(libraryPage + 1)">下一页</button>
                 </div>
             </template>
             <template v-else>
@@ -404,6 +427,8 @@
                 <select v-model.number="reportFilter.subject_id" @change="loadReport">
                     <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
                 </select>
+                <a class="btn" :href="reportFilter.subject_id ? ('/api/reports/export/word?subject_id=' + reportFilter.subject_id) : '/api/reports/export/word'">导出 Word</a>
+                <a class="btn" :href="reportFilter.subject_id ? ('/api/reports/export/pdf?subject_id=' + reportFilter.subject_id) : '/api/reports/export/pdf'">导出 PDF</a>
             </div>
             <template v-if="reportData">
                 <div class="report-cards">
@@ -457,7 +482,12 @@
                             <h3>复习计划</h3>
                             <p class="plan-counts">今日待复习 {{ reviewPlanCounts.today }} 条 · 逾期 {{ reviewPlanCounts.overdue }} 条</p>
                         </div>
-                        <button type="button" class="btn-primary" @click="generateTodayPlans">生成今日复习计划</button>
+                        <div class="plan-actions">
+                            <button type="button" class="btn-primary" @click="generateTodayPlans">生成今日复习计划</button>
+                            <button type="button" class="btn" @click="requestReminderPermission">开启浏览器提醒</button>
+                            <input type="time" v-model="settings.reminder_time" @change="saveReminderSettings" title="每日提醒时间">
+                            <a class="btn" href="/api/review/plans/export.ics">导出日历</a>
+                        </div>
                     </div>
                     <p v-if="reviewPlanGroups.overdue.length" class="plan-alert">有 {{ reviewPlanGroups.overdue.length }} 条复习计划已逾期，请尽快完成。</p>
                     <div v-for="group in [
@@ -633,9 +663,9 @@
     <div class="modal" v-if="showResetModal" @click.self="showResetModal=false">
         <div class="modal-body">
             <h3>重置密码</h3>
-            <div class="form-row"><input v-model.trim="resetForm.username" placeholder="账号"></div>
-            <div class="form-row"><input type="password" v-model="resetForm.new_password" placeholder="新密码（字母或数字）"></div>
-            <div class="form-row"><input type="password" v-model="resetForm.confirm_password" placeholder="确认新密码"></div>
+            <div class="form-row"><input v-model.trim="resetPasswordForm.username" placeholder="账号"></div>
+            <div class="form-row"><input type="password" v-model="resetPasswordForm.new_password" placeholder="新密码（字母或数字）"></div>
+            <div class="form-row"><input type="password" v-model="resetPasswordForm.confirm_password" placeholder="确认新密码"></div>
             <div class="modal-actions">
                 <button class="btn-primary" @click="resetPassword">确认重置</button>
                 <button class="btn" @click="showResetModal=false">取消</button>
@@ -1212,6 +1242,6 @@
     </div>
     </template>
 </div>
-    <script src="/static/app.js?v=20260909a"></script>
+    <script src="/static/app.js?v=20260919a"></script>
 </body>
 </html>

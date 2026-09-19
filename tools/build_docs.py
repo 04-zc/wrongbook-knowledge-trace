@@ -27,11 +27,11 @@ def build_manual():
     doc.styles['Normal'].font.size = Pt(10.5)
     doc.add_heading('错题本知识溯源整理助手', 0)
     doc.add_heading('软件使用说明', 1)
-    doc.add_paragraph('版本：v3.0')
+    doc.add_paragraph('版本：v3.1')
     doc.add_paragraph('演示账号：demo    密码：demo123')
 
     doc.add_heading('1. 登录系统', 1)
-    doc.add_paragraph('启动 python app.py 后访问 http://localhost:5000。首次进入需要登录，账号和密码只能使用英文字母和数字。')
+    doc.add_paragraph('Windows 推荐双击“启动错题本.bat”，脚本会自动定位 Python、启动服务并打开浏览器。也可以运行 python app.py 后访问 http://localhost:5000。首次进入需要登录，账号和密码只能使用英文字母和数字。')
     add_image(doc, '00_login.png', '图 1 登录界面')
 
     doc.add_heading('2. 首页概览', 1)
@@ -43,7 +43,7 @@ def build_manual():
     add_image(doc, '02_input.png', '图 3 错题录入')
 
     doc.add_heading('4. 错题管理', 1)
-    doc.add_paragraph('错题库支持按学科、知识点、状态和关键词筛选，支持多选后批量关联知识点、修改状态和删除。')
+    doc.add_paragraph('错题库支持按学科、知识点、状态和关键词筛选，支持多选后批量关联知识点、修改状态和删除。错题列表采用分页加载，题目较多时不会一次加载全部数据。')
     add_image(doc, '03_library.png', '图 4 错题库与批量操作')
     doc.add_paragraph('点击题目标题查看详情，可以进行编辑、知识溯源和查看知识导图。')
     add_image(doc, '04_question_detail.png', '图 5 错题详情')
@@ -53,7 +53,7 @@ def build_manual():
     add_image(doc, '05_mindmap.png', '图 6 知识溯源思维导图')
 
     doc.add_heading('6. 复习模式', 1)
-    doc.add_paragraph('支持今日推荐、自动生成今日复习计划、自定义日期计划、完成/跳过计划和逾期提醒。')
+    doc.add_paragraph('支持今日推荐、自动生成今日复习计划、自定义日期计划、完成/跳过计划和逾期提醒。可以开启浏览器提醒、设置每日提醒时间，也可以导出 .ics 文件加入手机日历。')
     add_image(doc, '06_review.png', '图 7 复习模式')
 
     doc.add_heading('7. 薄弱分析', 1)
@@ -67,7 +67,7 @@ def build_manual():
     add_image(doc, '10_graph_sunburst.png', '图 11 知识图谱旭日图')
 
     doc.add_heading('9. 统计报表', 1)
-    doc.add_paragraph('统计报表展示错题总数、知识点数、近 30 天新增、近 30 天仍错、复习正确率、待复习计划，以及状态分布图和薄弱排行图。')
+    doc.add_paragraph('统计报表展示错题总数、知识点数、近 30 天新增、近 30 天仍错、复习正确率、待复习计划，以及状态分布图和薄弱排行图。支持一键导出 Word 和 PDF。')
     add_image(doc, '11_report.png', '图 12 统计报表')
 
     doc.add_heading('10. 回收站', 1)
@@ -86,6 +86,12 @@ def build_manual():
     doc.add_paragraph('配置大模型 API Key、模型名称、知识点推荐阈值，以及 OCR 语言、方向识别和置信度阈值。')
     add_image(doc, '15_model_ocr.png', '图 16 模型与 OCR 配置')
 
+    doc.add_heading('14. PWA 与离线查看', 1)
+    doc.add_paragraph('在 localhost 或 HTTPS 环境可将系统添加到手机主屏幕。断网时可以查看已缓存的错题和首页数据，退出账号时会清理当前用户的离线缓存。局域网普通 HTTP 环境可能无法使用完整安装和系统通知，此时可使用 .ics 日历导出。')
+
+    doc.add_heading('15. 性能与流式输出', 1)
+    doc.add_paragraph('错题库采用后端分页，首页只加载最近错题和汇总数量，数据库查询增加索引。概念回顾、知识点精要和单题 AI 解答使用流式输出，内容逐步显示。')
+
     out = os.path.join(DOCS, '软件使用说明.docx')
     doc.save(out)
     return out
@@ -97,6 +103,7 @@ def build_modules():
     doc.styles['Normal'].font.size = Pt(10.5)
     doc.add_heading('错题本知识溯源整理助手', 0)
     doc.add_heading('功能模块说明', 1)
+    doc.add_paragraph('版本：v3.1')
 
     sections = [
         ('1. 系统概述', '系统面向个人学习者，围绕“错题录入—知识点识别—知识溯源—薄弱分析—复习计划—掌握反馈”构建完整闭环。'),
@@ -114,12 +121,15 @@ def build_modules():
         ('13. 统计报表模块', '展示错题总数、知识点数、近 30 天新增、近 30 天仍错、复习正确率、待复习计划，以及状态分布和薄弱排行图表。'),
         ('14. 数据备份模块', '导出单一 ZIP 数据包，内部包含 JSON 和 SQLite 备份；导入时只需选择该数据包，系统自动恢复全部用户数据。'),
         ('15. 系统配置模块', '支持大模型 API Key、模型名称、知识点推荐阈值，以及 OCR 语言、方向识别和置信度阈值配置。'),
+        ('16. PWA 移动端模块', '支持添加到主屏幕、离线查看缓存数据和用户级缓存隔离；在 localhost 或 HTTPS 环境下体验最佳。'),
+        ('17. 报表导出模块', '统计报表、薄弱分析和复习计划支持导出 Word 与 PDF。'),
+        ('18. 性能优化模块', '错题库分页、首页轻量查询、SQLite 索引和 AI 流式输出。'),
     ]
     for title, body in sections:
         doc.add_heading(title, 2)
         doc.add_paragraph(body)
 
-    doc.add_heading('16. 数据库主要数据表', 2)
+    doc.add_heading('19. 数据库主要数据表', 2)
     table = doc.add_table(rows=1, cols=2)
     table.style = 'Table Grid'
     table.rows[0].cells[0].text = '表名'
@@ -136,7 +146,7 @@ def build_modules():
         cells[0].text = name
         cells[1].text = use
 
-    doc.add_heading('17. 演示数据', 2)
+    doc.add_heading('20. 演示数据', 2)
     doc.add_paragraph('运行 python tools/seed_demo.py 可生成演示账号 demo / demo123，以及 3 个学科、17 个知识点、12 道错题、30 天复习记录、复习计划、知识库内容、学习资源和知识溯源导图。')
 
     out = os.path.join(DOCS, '功能模块说明.docx')
