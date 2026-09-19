@@ -38,7 +38,8 @@
     <div v-if="loading" class="loading-mask">加载中...</div>
     <div v-if="error" class="error-toast">{{ error }}</div>
     <div class="app-shell">
-        <aside class="app-sidebar">
+        <aside class="app-sidebar" :class="{open: mobileMenuOpen}">
+            <button type="button" class="mobile-close" @click="mobileMenuOpen=false">×</button>
             <div class="side-brand">
                 <div class="side-logo">错</div>
                 <div>
@@ -59,7 +60,13 @@
                 <button type="button" @click="switchUser">切换用户</button>
             </div>
         </aside>
+        <div class="mobile-overlay" v-if="mobileMenuOpen" @click="mobileMenuOpen=false"></div>
         <div class="app-content">
+            <div class="mobile-topbar">
+                <button type="button" class="mobile-menu-btn" @click="mobileMenuOpen=true">☰</button>
+                <div class="mobile-page-title">错题本助手</div>
+                <button type="button" class="mobile-user-btn" @click="openAccountModal">{{ authUser.username }}</button>
+            </div>
             <header class="app-header">
                 <div class="header-title">
                     <h1>错题本知识溯源整理助手</h1>
@@ -353,6 +360,26 @@
                 <button type="button" :class="{active: graphChartMode==='layered'}" @click="switchGraphMode('layered')">分层导图</button>
                 <button type="button" :class="{active: graphChartMode==='tree'}" @click="switchGraphMode('tree')">树图</button>
                 <button type="button" :class="{active: graphChartMode==='sunburst'}" @click="switchGraphMode('sunburst')">旭日图</button>
+            </div>
+            <div class="graph-mobile" v-if="graphSubject">
+                <div class="graph-mobile-head">
+                    <button type="button" class="btn" v-if="graphMobilePath.length" @click="backGraphMobile">← 返回上一级</button>
+                    <div class="graph-mobile-breadcrumb">
+                        {{ graphSubject.name }}
+                        <span v-for="item in graphMobilePath" :key="item.id"> > {{ item.name }}</span>
+                    </div>
+                </div>
+                <div class="graph-mobile-list">
+                    <div v-for="n in graphMobileChildren" :key="n.id" class="graph-mobile-item">
+                        <button type="button" class="graph-mobile-main" @click="openGraphMobileNode(n)">
+                            <span>{{ n.name }}</span>
+                            <span class="graph-mobile-count" v-if="n.question_count">{{ n.question_count }}</span>
+                            <span class="graph-mobile-arrow" v-if="graphNodes.some(x => x.parent_id === n.id)">›</span>
+                        </button>
+                        <button type="button" class="mini-btn" @click="openGraphNode(n)">详情</button>
+                    </div>
+                    <p v-if="!graphMobileChildren.length" class="empty-tip">当前层级没有子知识点。</p>
+                </div>
             </div>
             <div class="graph-canvas" v-if="graphSubject" v-show="graphChartMode==='layered'">
                 <div class="graph-center">{{ graphSubject.name }}</div>

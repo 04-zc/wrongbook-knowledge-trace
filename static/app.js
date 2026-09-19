@@ -31,6 +31,7 @@ const appOptions = {
     data() {
         return {
             currentNav: 'dashboard',
+            mobileMenuOpen: false,
             loading: true,
             error: '',
             authUser: null,
@@ -101,6 +102,8 @@ const appOptions = {
             graphSubject: null,
             graphNodes: [],
             graphChartMode: 'layered',
+            graphMobileParent: null,
+            graphMobilePath: [],
             reportFilter: { subject_id: null },
             reportData: null,
             trendData: [],
@@ -262,6 +265,13 @@ const appOptions = {
             });
             return levels.map((nodes, level) => ({ level, nodes })).filter(item => item.nodes && item.nodes.length);
         },
+        graphMobileChildren() {
+            const parent = this.graphMobileParent;
+            if (parent === null) {
+                return this.graphNodes.filter(n => !n.parent_id);
+            }
+            return this.graphNodes.filter(n => n.parent_id === parent);
+        },
         reviewPlanGroups() {
             const today = new Date().toISOString().slice(0, 10);
             const pending = this.reviewPlans.filter(p => p.status === 'pending');
@@ -341,6 +351,7 @@ const appOptions = {
             }
         },
         async switchUser() {
+            this.mobileMenuOpen = false;
             try {
                 await axios.post('/api/auth/logout');
             } catch (e) {
@@ -354,6 +365,7 @@ const appOptions = {
             this.authConfirm = '';
         },
         openAccountModal() {
+            this.mobileMenuOpen = false;
             this.accountForm = {
                 new_username: '',
                 rename_password: '',
@@ -478,6 +490,7 @@ const appOptions = {
             return emptyForm();
         },
         goTo(key) {
+            this.mobileMenuOpen = false;
             if (key === 'trash') {
                 this.currentNav = 'library';
                 this.openTrash();
@@ -634,6 +647,8 @@ const appOptions = {
             const res = await axios.get('/api/knowledge_graph', { params: { subject_id: sid } });
             this.graphSubject = res.data.subject || null;
             this.graphNodes = res.data.nodes || [];
+            this.graphMobileParent = null;
+            this.graphMobilePath = [];
             this.$nextTick(() => this.renderGraphChart());
         },
         async loadReport() {
@@ -786,6 +801,19 @@ const appOptions = {
         switchGraphMode(mode) {
             this.graphChartMode = mode;
             this.$nextTick(() => this.renderGraphChart());
+        },
+        openGraphMobileNode(node) {
+            const children = this.graphNodes.filter(n => n.parent_id === node.id);
+            if (children.length) {
+                this.graphMobilePath.push(node);
+                this.graphMobileParent = node.id;
+            } else {
+                this.openGraphNode(node);
+            }
+        },
+        backGraphMobile() {
+            const last = this.graphMobilePath.pop();
+            this.graphMobileParent = last && last.parent_id ? last.parent_id : null;
         },
         async openGraphNode(kp) {
             const byId = {};
@@ -1945,6 +1973,7 @@ const appOptions = {
             await this.loadWeak();
         },
         async openLlmConfig() {
+            this.mobileMenuOpen = false;
             if (!this.settings.llm_model) {
                 await this.loadSettings();
             }
