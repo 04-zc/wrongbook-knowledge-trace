@@ -27,7 +27,8 @@ def build_manual():
     doc.styles['Normal'].font.size = Pt(10.5)
     doc.add_heading('错题本知识溯源整理助手', 0)
     doc.add_heading('软件使用说明', 1)
-    doc.add_paragraph('版本：v3.1')
+    doc.add_paragraph('版本：v3.2')
+    doc.add_paragraph('更新日期：2026-09-24')
     doc.add_paragraph('演示账号：demo    密码：demo123')
 
     doc.add_heading('1. 登录系统', 1)
@@ -57,7 +58,7 @@ def build_manual():
     add_image(doc, '06_review.png', '图 7 复习模式')
 
     doc.add_heading('7. 薄弱分析', 1)
-    doc.add_paragraph('展示薄弱知识点 TOP-N、累计错误、近 7 天错误、30 天趋势和复习优先级。薄弱指数按错题数、累计错误、时间衰减和近期错误综合计算。')
+    doc.add_paragraph('展示薄弱知识点 TOP-N、累计错误、近 7 天错误、30 天趋势和复习优先级。薄弱指数先按当前候选范围内的最高错题数、最高累计错误次数、最高时间衰减值和最高近 7 天错误次数归一化，再按 0.4、0.3、0.2、0.1 加权并乘以 10，得到 0 到 10 的相对分数。没有复习记录时，系统使用错题创建时间估算时间衰减。')
     add_image(doc, '07_weak.png', '图 8 薄弱分析与趋势图')
 
     doc.add_heading('8. 知识图谱', 1)
@@ -92,6 +93,9 @@ def build_manual():
     doc.add_heading('15. 性能与流式输出', 1)
     doc.add_paragraph('错题库采用后端分页，首页只加载最近错题和汇总数量，数据库查询增加索引。概念回顾、知识点精要和单题 AI 解答使用流式输出，内容逐步显示。')
 
+    doc.add_heading('16. 使用限制', 1)
+    doc.add_paragraph('拍照识别需要本机安装 PaddleOCR 和 PaddlePaddle；AI 推荐、知识溯源和 AI 学习内容需要配置大模型 API Key。PWA 安装与系统通知需要 localhost 或 HTTPS，浏览器通知只在页面打开时检查。回收站中的错题不会自动过期删除，需要手动彻底删除。')
+
     out = os.path.join(DOCS, '软件使用说明.docx')
     doc.save(out)
     return out
@@ -103,7 +107,9 @@ def build_modules():
     doc.styles['Normal'].font.size = Pt(10.5)
     doc.add_heading('错题本知识溯源整理助手', 0)
     doc.add_heading('功能模块说明', 1)
-    doc.add_paragraph('版本：v3.1')
+    doc.add_paragraph('版本：v3.2')
+    doc.add_paragraph('更新日期：2026-09-24')
+    doc.add_paragraph('实现基线：以当前代码为准，共 13 张数据表、66 个路由路径（78 个 URL/方法绑定）。')
 
     sections = [
         ('1. 系统概述', '系统面向个人学习者，围绕“错题录入—知识点识别—知识溯源—薄弱分析—复习计划—掌握反馈”构建完整闭环。'),
@@ -113,7 +119,7 @@ def build_modules():
         ('5. 错题管理模块', '提供错题增删改查、按学科/知识点/状态筛选、批量关联知识点、批量修改状态和批量删除。删除进入回收站，可恢复或彻底删除。'),
         ('6. 知识树模块', '以学科为根节点，支持多级知识点、逐层展开、搜索定位、添加子级和删除子树。'),
         ('7. 知识溯源模块', '调用大模型分析错误表象、直接知识点、前置知识点和根本原因。用户确认后生成独立思维导图，不污染知识树。用户反馈会影响后续推荐权重。'),
-        ('8. 薄弱分析模块', '薄弱指数由错题数量、累计错误次数、时间衰减和近 7 天重复错误加权计算，最终换算为 0～10 分，并提供 30 天趋势和复习优先级。'),
+        ('8. 薄弱分析模块', '薄弱指数先按当前候选范围内的最高错题数、最高累计错误次数、最高时间衰减值和最高近 7 天错误次数归一化，再按 0.4、0.3、0.2、0.1 加权并乘以 10，得到 0 到 10 的相对分数。没有复习记录时，使用错题创建时间估算时间衰减。该模块同时提供 30 天趋势和复习优先级。'),
         ('9. 复习模式模块', '支持今日推荐、自动生成今日计划、自定义计划、完成/跳过计划、待复习角标和逾期提醒。'),
         ('10. 知识库模块', '知识点详情中支持知识点说明、知识点精要、概念回顾、典型例题、变式练习等内容的增删改查。'),
         ('11. 学习资源模块', '支持教材页码、网课链接、笔记内容和附件上传。AI 推荐提供 B站搜索链接和复习笔记，不虚构教材页码和 BV 号。'),
@@ -130,6 +136,7 @@ def build_modules():
         doc.add_paragraph(body)
 
     doc.add_heading('19. 数据库主要数据表', 2)
+    doc.add_paragraph('当前代码共创建 13 张数据表：')
     table = doc.add_table(rows=1, cols=2)
     table.style = 'Table Grid'
     table.rows[0].cells[0].text = '表名'
@@ -146,8 +153,13 @@ def build_modules():
         cells[0].text = name
         cells[1].text = use
 
+    doc.add_paragraph('questions.deleted_at 是软删除标记。字段为空表示正常错题，非空表示已进入回收站；当前版本不自动按时间清理回收站。')
+
     doc.add_heading('20. 演示数据', 2)
     doc.add_paragraph('运行 python tools/seed_demo.py 可生成演示账号 demo / demo123，以及 3 个学科、17 个知识点、12 道错题、30 天复习记录、复习计划、知识库内容、学习资源和知识溯源导图。')
+
+    doc.add_heading('21. 实现边界与已知限制', 2)
+    doc.add_paragraph('OCR 依赖本机 PaddleOCR 和 PaddlePaddle；大模型功能依赖用户配置的 API Key。PWA 完整安装和系统通知需要 localhost 或 HTTPS，浏览器通知只在页面打开时检查。SQLite 适合单机个人使用，不适合多机或高并发部署。上传接口尚未统一增加扩展名白名单、文件内容校验和请求体大小限制，部署到公网前应补充这些保护。')
 
     out = os.path.join(DOCS, '功能模块说明.docx')
     doc.save(out)
