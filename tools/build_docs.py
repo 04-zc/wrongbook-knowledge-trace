@@ -1,24 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""根据演示截图生成 Word 版说明文档。"""
+"""生成 Word 版说明文档。"""
 import os
 from docx import Document
-from docx.shared import Inches, Pt
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Pt
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SHOTS = os.path.join(ROOT, 'output', 'playwright', 'screenshots')
 DOCS = os.path.join(ROOT, 'docs')
-
-
-def add_image(doc, filename, caption):
-    path = os.path.join(SHOTS, filename)
-    if not os.path.exists(path):
-        return
-    doc.add_picture(path, width=Inches(6.2))
-    doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
-    cap = doc.add_paragraph(caption)
-    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
 def build_manual():
@@ -29,63 +17,46 @@ def build_manual():
     doc.add_heading('软件使用说明', 1)
     doc.add_paragraph('版本：v3.2')
     doc.add_paragraph('更新日期：2026-09-24')
-    doc.add_paragraph('演示账号：demo    密码：demo123')
 
     doc.add_heading('1. 登录系统', 1)
     doc.add_paragraph('Windows 推荐双击“启动错题本.bat”，脚本会自动定位 Python、启动服务并打开浏览器。也可以运行 python app.py 后访问 http://localhost:5000。首次进入需要登录，账号和密码只能使用英文字母和数字。')
-    add_image(doc, '00_login.png', '图 1 登录界面')
 
     doc.add_heading('2. 首页概览', 1)
     doc.add_paragraph('首页显示总错题数、未掌握数量、薄弱知识点 TOP3 和最近错题。左侧为垂直导航栏，包含全部功能入口。')
-    add_image(doc, '01_dashboard.png', '图 2 首页概览')
 
     doc.add_heading('3. 错题录入', 1)
     doc.add_paragraph('支持手动录入、拍照 OCR、图片选择和 PDF/Word 导入。题干支持 LaTeX 公式实时渲染，保存前会二次确认。')
-    add_image(doc, '02_input.png', '图 3 错题录入')
 
     doc.add_heading('4. 错题管理', 1)
     doc.add_paragraph('错题库支持按学科、知识点、状态和关键词筛选，支持多选后批量关联知识点、修改状态和删除。错题列表采用分页加载，题目较多时不会一次加载全部数据。')
-    add_image(doc, '03_library.png', '图 4 错题库与批量操作')
     doc.add_paragraph('点击题目标题查看详情，可以进行编辑、知识溯源和查看知识导图。')
-    add_image(doc, '04_question_detail.png', '图 5 错题详情')
 
     doc.add_heading('5. 知识溯源思维导图', 1)
     doc.add_paragraph('AI 分析错题后给出错误表象、直接知识点、前置知识点和根本原因。用户勾选后生成独立思维导图，不会写入知识树。')
-    add_image(doc, '05_mindmap.png', '图 6 知识溯源思维导图')
 
     doc.add_heading('6. 复习模式', 1)
     doc.add_paragraph('支持今日推荐、自动生成今日复习计划、自定义日期计划、完成/跳过计划和逾期提醒。可以开启浏览器提醒、设置每日提醒时间，也可以导出 .ics 文件加入手机日历。')
-    add_image(doc, '06_review.png', '图 7 复习模式')
 
     doc.add_heading('7. 薄弱分析', 1)
     doc.add_paragraph('展示薄弱知识点 TOP-N、累计错误、近 7 天错误、30 天趋势和复习优先级。薄弱指数先按当前候选范围内的最高错题数、最高累计错误次数、最高时间衰减值和最高近 7 天错误次数归一化，再按 0.4、0.3、0.2、0.1 加权并乘以 10，得到 0 到 10 的相对分数。没有复习记录时，系统使用错题创建时间估算时间衰减。')
-    add_image(doc, '07_weak.png', '图 8 薄弱分析与趋势图')
 
     doc.add_heading('8. 知识图谱', 1)
     doc.add_paragraph('知识图谱以学科为中心向外发散，支持分层导图、树图和旭日图。点击节点可以查看和编辑知识点说明、知识库内容和学习资源。')
-    add_image(doc, '08_graph_layered.png', '图 9 知识图谱分层图')
-    add_image(doc, '09_graph_tree.png', '图 10 知识图谱树图')
-    add_image(doc, '10_graph_sunburst.png', '图 11 知识图谱旭日图')
 
     doc.add_heading('9. 统计报表', 1)
     doc.add_paragraph('统计报表展示错题总数、知识点数、近 30 天新增、近 30 天仍错、复习正确率、待复习计划，以及状态分布图和薄弱排行图。支持一键导出 Word 和 PDF。')
-    add_image(doc, '11_report.png', '图 12 统计报表')
 
     doc.add_heading('10. 回收站', 1)
     doc.add_paragraph('删除错题后进入回收站，可以恢复或彻底删除。彻底删除后无法恢复。')
-    add_image(doc, '12_trash.png', '图 13 回收站')
 
     doc.add_heading('11. 学科设置', 1)
     doc.add_paragraph('支持学科管理和知识点树搭建。知识点树逐层展开，支持搜索定位、添加子级和删除子树。')
-    add_image(doc, '13_settings.png', '图 14 学科设置')
 
     doc.add_heading('12. 账号设置与数据备份', 1)
     doc.add_paragraph('账号设置支持改名、修改密码、重置密码、删除账号，以及导出/导入单一数据包。')
-    add_image(doc, '14_account.png', '图 15 账号设置')
 
     doc.add_heading('13. 模型与 OCR 配置', 1)
     doc.add_paragraph('配置大模型 API Key、模型名称、知识点推荐阈值，以及 OCR 语言、方向识别和置信度阈值。')
-    add_image(doc, '15_model_ocr.png', '图 16 模型与 OCR 配置')
 
     doc.add_heading('14. PWA 与离线查看', 1)
     doc.add_paragraph('在 localhost 或 HTTPS 环境可将系统添加到手机主屏幕。断网时可以查看已缓存的错题和首页数据，退出账号时会清理当前用户的离线缓存。局域网普通 HTTP 环境可能无法使用完整安装和系统通知，此时可使用 .ics 日历导出。')
@@ -155,10 +126,7 @@ def build_modules():
 
     doc.add_paragraph('questions.deleted_at 是软删除标记。字段为空表示正常错题，非空表示已进入回收站；当前版本不自动按时间清理回收站。')
 
-    doc.add_heading('20. 演示数据', 2)
-    doc.add_paragraph('运行 python tools/seed_demo.py 可生成演示账号 demo / demo123，以及 3 个学科、17 个知识点、12 道错题、30 天复习记录、复习计划、知识库内容、学习资源和知识溯源导图。')
-
-    doc.add_heading('21. 实现边界与已知限制', 2)
+    doc.add_heading('20. 实现边界与已知限制', 2)
     doc.add_paragraph('OCR 依赖本机 PaddleOCR 和 PaddlePaddle；大模型功能依赖用户配置的 API Key。PWA 完整安装和系统通知需要 localhost 或 HTTPS，浏览器通知只在页面打开时检查。SQLite 适合单机个人使用，不适合多机或高并发部署。上传接口尚未统一增加扩展名白名单、文件内容校验和请求体大小限制，部署到公网前应补充这些保护。')
 
     out = os.path.join(DOCS, '功能模块说明.docx')

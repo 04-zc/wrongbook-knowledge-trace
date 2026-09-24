@@ -15,9 +15,7 @@ uploads/
 
 # WorkBuddy and temporary pipeline output
 .workbuddy/
-output/req_srs_20260909/
-output/pkg_template_extract/
-output/playwright/test1/
+output/
 错题本知识溯源整理助手_论文包装升级方案*.docx
 
 # Browser automation temp files

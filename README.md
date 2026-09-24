@@ -51,22 +51,12 @@ python app.py
 
 访问：http://localhost:5000
 
-生成演示数据：
-
-```bash
-python tools/seed_demo.py
-```
-
-演示账号：`demo` / `demo123`
-
 ## 文档
 
 - [软件使用说明](docs/软件使用说明.md)
 - [功能模块说明](docs/功能模块说明.md)
 - [Word 版使用说明](docs/软件使用说明.docx)
 - [Word 版功能模块说明](docs/功能模块说明.docx)
-- [演示截图](output/playwright/screenshots)
-- [演示视频](output/playwright/video/demo_video.webm)
 
 ## 项目结构
 
@@ -77,12 +67,8 @@ report_export.py             Word / PDF 报表导出
 static/                       前端页面、样式、脚本和 PWA 资源
 static/manifest.webmanifest   PWA 应用清单
 static/sw.js                  Service Worker 离线缓存
-tools/seed_demo.py            演示数据生成
-tools/e2e_test1.py            全功能回归测试
-tools/record_demo.js          演示录屏
 tools/build_docs.py           生成 Word 说明文档
 docs/                         使用说明和功能模块文档
-output/playwright/            演示截图和视频
 uploads/                      用户上传图片与附件
 ```
 
