@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wrongbook-shell-v3';
+const CACHE_NAME = 'wrongbook-shell-v5';
 const META_CACHE = 'wrongbook-sw-meta';
 const META_USER_URL = '/__wrongbook_user_id';
 const USER_CACHE_PREFIX = 'wrongbook-user-';
@@ -16,7 +16,8 @@ const APP_SHELL = [
     '/static/icons/icon-512.png'
 ];
 const USER_API_PATHS = new Set([
-    '/api/auth/me',
+    // 认证状态不缓存：缓存的 /api/auth/me 会在会话失效时让前端误判为已登录，
+    // 随后所有业务接口 401，触发刷新循环。
     '/api/questions',
     '/api/questions/page',
     '/api/questions/trash',
@@ -47,7 +48,13 @@ self.addEventListener('activate', event => {
         caches.keys()
             .then(keys => Promise.all(
                 keys
-                    .filter(key => key.startsWith('wrongbook-shell-') && key !== CACHE_NAME)
+                    .filter(key => {
+                        // 外壳缓存只保留当前版本
+                        if (key.startsWith('wrongbook-shell-')) return key !== CACHE_NAME;
+                        // 每用户缓存只保留当前版本，避免残留过期的接口数据
+                        if (key.startsWith(USER_CACHE_PREFIX)) return !key.endsWith('-v5');
+                        return false;
+                    })
                     .map(key => caches.delete(key))
             ))
             .then(() => self.clients.claim())
@@ -70,6 +77,9 @@ self.addEventListener('fetch', event => {
 
     const url = new URL(request.url);
     if (url.origin !== self.location.origin) return;
+
+    // 用户上传文件可能是私有附件，不进公共外壳缓存，避免换账号后串数据
+    if (url.pathname.startsWith('/uploads/')) return;
 
     if (url.pathname.startsWith('/api/')) {
         event.respondWith(networkFirstApi(request, url));
@@ -121,7 +131,7 @@ async function clearUserCaches() {
 async function getUserCache() {
     const userId = await getCurrentUserId();
     if (!userId) return null;
-    return caches.open(USER_CACHE_PREFIX + userId + '-v3');
+    return caches.open(USER_CACHE_PREFIX + userId + '-v5');
 }
 
 async function networkFirstApi(request, url) {

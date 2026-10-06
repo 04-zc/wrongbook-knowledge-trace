@@ -129,7 +129,7 @@
                     <label>导入试卷</label>
                     <div class="upload-actions">
                         <button type="button" class="upload-btn" @click="$refs.importFileInput.click()">导入 PDF / Word 试卷</button>
-                        <input ref="importFileInput" type="file" accept=".pdf,.doc,.docx" @change="handleImportFile" hidden>
+                        <input ref="importFileInput" type="file" accept=".pdf,.docx" @change="handleImportFile" hidden>
                     </div>
                     <div v-if="importLoading" class="ocr-status">正在解析试卷，扫描版可能需要较长时间...</div>
                     <p v-if="importMessage" class="add-hint">{{ importMessage }}</p>
@@ -664,6 +664,7 @@
         <div class="modal-body">
             <h3>重置密码</h3>
             <div class="form-row"><input v-model.trim="resetPasswordForm.username" placeholder="账号"></div>
+            <div class="form-row"><input type="password" v-model="resetPasswordForm.old_password" placeholder="原密码"></div>
             <div class="form-row"><input type="password" v-model="resetPasswordForm.new_password" placeholder="新密码（字母或数字）"></div>
             <div class="form-row"><input type="password" v-model="resetPasswordForm.confirm_password" placeholder="确认新密码"></div>
             <div class="modal-actions">
@@ -686,6 +687,13 @@
                 <input type="text" v-model="settings.llm_model" placeholder="deepseek-chat 或 qwen-turbo">
             </div>
             <h4 style="margin-top:18px">OCR 参数</h4>
+            <div class="form-row">
+                <label>OCR 识别</label>
+                <select v-model="settings.ocr_enabled">
+                    <option value="true">开启</option>
+                    <option value="false">关闭（仅保存图片）</option>
+                </select>
+            </div>
             <div class="form-row">
                 <label>识别语言</label>
                 <select v-model="settings.ocr_lang">

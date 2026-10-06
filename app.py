@@ -12,14 +12,23 @@ import fitz
 from flask import Flask, request, jsonify, send_from_directory, session, send_file, Response, stream_with_context
 from werkzeug.security import generate_password_hash, check_password_hash
 
+import logging
+
 import db
 import report_export
+
+logger = logging.getLogger('wrongbook')
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(name)s: %(message)s'
+    )
 
 try:
     from paddleocr import PaddleOCR
     PADDLE_AVAILABLE = True
 except Exception as e:
-    print('PaddleOCR import failed:', e)
+    logger.info('PaddleOCR 不可用，拍照识别将降级为仅保存图片: %s', e)
     PADDLE_AVAILABLE = False
 
 _ocr = None
@@ -36,13 +45,96 @@ def get_ocr():
             _ocr_cache[key] = PaddleOCR(use_angle_cls=orientation, lang=lang, show_log=False)
     return _ocr_cache.get(key)
 
+
+def ocr_enabled():
+    value = (db.get_setting('ocr_enabled', 'true') or 'true').strip().lower()
+    return value not in ('false', '0', 'off', 'no')
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, 'static')
 UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# /uploads 由服务直接托管，禁止上传可被浏览器执行的类型（html/svg/js），
+# 否则构成存储型 XSS。
+IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif'}
+ATTACHMENT_EXTS = IMAGE_EXTS | {'.pdf', '.doc', '.docx'}
+
+# 文件头特征，用于拦截“改了扩展名但内容不符”的上传
+FILE_SIGNATURES = {
+    '.jpg': (b'\xff\xd8\xff',),
+    '.jpeg': (b'\xff\xd8\xff',),
+    '.png': (b'\x89PNG\r\n\x1a\n',),
+    '.gif': (b'GIF87a', b'GIF89a'),
+    '.bmp': (b'BM',),
+    '.pdf': (b'%PDF-',),
+    '.doc': (b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1',),
+    '.docx': (b'PK\x03\x04',),
+}
+
+
+def _file_head(file, size=16):
+    """读取文件头后把流位置还原，供后续 save() 使用。"""
+    stream = getattr(file, 'stream', None)
+    if stream is None:
+        return b''
+    position = None
+    try:
+        position = stream.tell()
+    except Exception:
+        pass
+    head = stream.read(size) or b''
+    if position is not None:
+        try:
+            stream.seek(position)
+        except Exception:
+            pass
+    return head
+
+
+def _matches_signature(head, ext):
+    if ext == '.webp':
+        return len(head) >= 12 and head[:4] == b'RIFF' and head[8:12] == b'WEBP'
+    signatures = FILE_SIGNATURES.get(ext)
+    if not signatures:
+        return False
+    return any(head.startswith(sig) for sig in signatures)
+
+
+def validate_upload(file, allowed_exts, label):
+    """校验扩展名和文件头。返回 (ext, error)，error 为 None 表示通过。"""
+    ext = os.path.splitext(file.filename or '')[1].lower()
+    if ext not in allowed_exts:
+        return ext, label
+    if not _matches_signature(_file_head(file), ext):
+        return ext, '文件内容与扩展名不符，已拒绝上传'
+    return ext, None
+
+
+def _user_upload_dir(uid):
+    path = os.path.join(UPLOAD_DIR, f'u{int(uid)}')
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _store_upload(file, ext, prefix):
+    """文件写入当前用户子目录，返回 (磁盘路径, 访问 URL)。"""
+    uid = session.get('user_id')
+    save_name = f'{prefix}_{os.urandom(5).hex()}{ext}'
+    save_path = os.path.join(_user_upload_dir(uid), save_name)
+    file.save(save_path)
+    return save_path, f'/uploads/u{uid}/{save_name}'
+
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path='/static')
 app.config['JSON_AS_ASCII'] = False
+# 单请求体上限，避免超大上传耗尽磁盘或长时间占用服务
+MAX_UPLOAD_BYTES = int(os.environ.get('WRONGBOOK_MAX_UPLOAD_MB', '32')) * 1024 * 1024
+app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
+# SameSite=Lax 让浏览器在跨站 POST/PUT/DELETE 时不携带会话 Cookie，从而阻断 CSRF；
+# HttpOnly 防止脚本读取会话。部署在 HTTPS 时设 WRONGBOOK_HTTPS=1 打开 Secure。
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('WRONGBOOK_HTTPS') == '1'
 
 SECRET_FILE = os.path.join(BASE_DIR, 'secret.key')
 if os.path.exists(SECRET_FILE):
@@ -53,25 +145,47 @@ else:
     with open(SECRET_FILE, 'wb') as f:
         f.write(app.secret_key)
 
+AUTH_PATHS = {
+    '/api/auth/register', '/api/auth/login', '/api/auth/logout',
+    '/api/auth/me', '/api/auth/reset_password',
+}
+
 @app.before_request
 def require_login():
     # 静态资源、首页与登录接口不拦截
     if (
         request.path.startswith('/static/')
-        or request.path.startswith('/uploads/')
         or request.path in ('/', '/manifest.webmanifest', '/sw.js')
     ):
         return None
-    if request.path.startswith('/api/auth/'):
+    if request.path in AUTH_PATHS:
+        return None
+    if request.method == 'OPTIONS':
         return None
     if 'user_id' not in session:
         return jsonify({'error': '未登录', 'auth_required': True}), 401
     db.set_current_user(session.get('user_id'))
     return None
 
+@app.errorhandler(ValueError)
+def handle_value_error(e):
+    # db 层的归属/参数校验统一抛 ValueError，这里转成 400，
+    # 避免把校验失败暴露成 500 堆栈。
+    return jsonify({'error': str(e)}), 400
+
+@app.errorhandler(413)
+def handle_request_too_large(e):
+    limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
+    return jsonify({'error': f'文件或请求过大，上限 {limit_mb} MB'}), 413
+
 @app.after_request
 def add_cors(resp):
-    resp.headers['Access-Control-Allow-Origin'] = '*'
+    # 本地单机部署，不需要跨域共享；原先的通配 Origin 会让任意站点
+    # 携带用户 Cookie 调用本机接口。仅在同源请求时回显 Origin。
+    origin = request.headers.get('Origin')
+    if origin and origin == request.host_url.rstrip('/'):
+        resp.headers['Access-Control-Allow-Origin'] = origin
+        resp.headers['Vary'] = 'Origin'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
     resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
     # 开发阶段禁用静态文件缓存，避免前端改了不生效
@@ -189,7 +303,8 @@ def call_llm_stream(prompt):
             delta = chunk.get('choices', [{}])[0].get('delta', {}).get('content')
             if delta:
                 yield delta
-        except Exception:
+        except Exception as e:
+            logger.debug('跳过无法解析的流式分片: %s', e)
             continue
 
 def classify_recommendations(recs):
@@ -258,7 +373,7 @@ path 中每一级都只写精简名称（12 个字以内），不要写解释。
                 })
         return classify_recommendations(result)
     except Exception as e:
-        print('AI recommend error:', e)
+        logger.warning('AI 推荐失败，降级为本地规则推荐: %s', e)
         return classify_recommendations(local_recommend(text, subject_id))
 
 QUESTION_MARK = re.compile(
@@ -316,22 +431,23 @@ def extract_pdf_text(path):
     ocr_used = False
     # 文本过少说明是扫描版，转图片走 OCR
     if len(text.strip()) < max(10, page_count * 10):
-        ocr_used = True
-        texts = []
-        for idx, page in enumerate(doc):
-            if idx >= 10:
-                break
-            pix = page.get_pixmap(dpi=200)
-            img_path = os.path.join(UPLOAD_DIR, f'pdf_page_{os.urandom(3).hex()}.png')
-            pix.save(img_path)
-            try:
-                texts.append(ocr_image(img_path))
-            finally:
+        if ocr_enabled() and PADDLE_AVAILABLE:
+            ocr_used = True
+            texts = []
+            for idx, page in enumerate(doc):
+                if idx >= 10:
+                    break
+                pix = page.get_pixmap(dpi=200)
+                img_path = os.path.join(UPLOAD_DIR, f'pdf_page_{os.urandom(3).hex()}.png')
+                pix.save(img_path)
                 try:
-                    os.remove(img_path)
-                except OSError:
-                    pass
-        text = '\n'.join(texts)
+                    texts.append(ocr_image(img_path))
+                finally:
+                    try:
+                        os.remove(img_path)
+                    except OSError:
+                        pass
+            text = '\n'.join(texts)
     doc.close()
     return text, ocr_used
 
@@ -400,19 +516,28 @@ def auth_change_password():
     if not stored or not check_password_hash(stored, old):
         return jsonify({'error': '原密码不正确'}), 400
     db.update_user_password(uid, generate_password_hash(new))
+    # 改密后强制重新登录，避免旧会话在密码疑似泄露时继续可用
+    session.clear()
     return jsonify({'ok': True})
 
 @app.route('/api/auth/reset_password', methods=['POST'])
 def auth_reset_password():
+    # 本地单机场景下无邮件/短信找回渠道，重置必须持有原密码，
+    # 否则任何未登录者都能凭用户名接管账号。
     body = request.get_json(force=True, silent=True) or {}
     username = (body.get('username') or '').strip()
+    old = body.get('old_password') or ''
     new = body.get('new_password') or ''
+    if not re.fullmatch(r'[A-Za-z0-9]{6,20}', new):
+        return jsonify({'error': '新密码只能是 6-20 位英文字母或数字'}), 400
     user = db.get_user_by_username(username)
     if not user:
         return jsonify({'error': '账号不存在'}), 404
-    if not re.fullmatch(r'[A-Za-z0-9]{6,20}', new):
-        return jsonify({'error': '新密码只能是 6-20 位英文字母或数字'}), 400
+    stored = db.get_user_password_by_id(user['id'])
+    if not stored or not check_password_hash(stored, old):
+        return jsonify({'error': '原密码不正确'}), 400
     db.update_user_password(user['id'], generate_password_hash(new))
+    session.clear()
     return jsonify({'ok': True})
 
 @app.route('/api/auth/rename', methods=['POST'])
@@ -460,7 +585,18 @@ def service_worker():
 
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
-    return send_from_directory(UPLOAD_DIR, filename)
+    normalized = filename.replace('\\', '/')
+    parts = [part for part in normalized.split('/') if part]
+    # 新版文件按用户分目录存放；旧版扁平文件仍可访问，但都必须先登录。
+    if len(parts) == 2 and parts[0].startswith('u') and parts[0][1:].isdigit():
+        if int(parts[0][1:]) != session.get('user_id'):
+            return jsonify({'error': '无权访问该文件'}), 403
+        normalized = f'{parts[0]}/{parts[1]}'
+    elif len(parts) != 1:
+        return jsonify({'error': '文件不存在'}), 404
+    resp = send_from_directory(UPLOAD_DIR, normalized)
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    return resp
 
 @app.route('/api/import/document', methods=['POST'])
 def api_import_document():
@@ -469,10 +605,12 @@ def api_import_document():
     file = request.files['file']
     filename = file.filename or ''
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in ('.pdf', '.docx', '.doc'):
-        return jsonify({'error': '只支持 PDF、DOC、DOCX 文件'}), 400
+    if ext not in ('.pdf', '.docx'):
+        return jsonify({'error': '只支持 PDF、DOCX 文件；旧版 .doc 请先另存为 .docx'}), 400
+    if not _matches_signature(_file_head(file), ext):
+        return jsonify({'error': '文件内容与扩展名不符，已拒绝上传'}), 400
     save_name = f"import_{os.urandom(4).hex()}{ext}"
-    save_path = os.path.join(UPLOAD_DIR, save_name)
+    save_path = os.path.join(_user_upload_dir(session.get('user_id')), save_name)
     file.save(save_path)
     try:
         if ext == '.pdf':
@@ -490,6 +628,12 @@ def api_import_document():
         })
     except Exception as e:
         return jsonify({'error': f'文件解析失败：{e}'}), 500
+    finally:
+        # 导入文件只用于本次解析，无论成功失败都不留在磁盘上
+        try:
+            os.remove(save_path)
+        except OSError:
+            pass
 
 @app.route('/api/import/save', methods=['POST'])
 def api_import_save():
@@ -588,13 +732,15 @@ def api_ai_generate():
         if mode in ('typical', 'variant'):
             try:
                 questions = json.loads(content).get('questions', [])
-            except Exception:
+            except Exception as e:
+                logger.warning('例题/变式题 JSON 解析失败，退回纯文本: %s', e)
                 questions = [{'question': content, 'answer': '', 'analysis': ''}]
             return jsonify({'mode': mode, 'questions': questions})
         if mode == 'resources':
             try:
                 resources = json.loads(content).get('resources', [])
-            except Exception:
+            except Exception as e:
+                logger.warning('学习资源 JSON 解析失败，返回空列表: %s', e)
                 resources = []
             return jsonify({'mode': mode, 'resources': resources})
         return jsonify({'mode': mode, 'content': content})
@@ -648,6 +794,7 @@ def api_ai_stream():
                 yield 'data: ' + json.dumps({'delta': delta}, ensure_ascii=False) + '\n\n'
             yield 'data: [DONE]\n\n'
         except Exception as exc:
+            logger.warning('流式生成中断: %s', exc)
             yield 'data: ' + json.dumps({'error': str(exc)}, ensure_ascii=False) + '\n\n'
 
     return Response(
@@ -854,10 +1001,11 @@ def api_upload_attachment():
     file = request.files['file']
     if not file or not file.filename:
         return jsonify({'error': '没有文件'}), 400
-    ext = os.path.splitext(file.filename)[1]
-    save_name = f"attach_{os.urandom(5).hex()}{ext}"
-    file.save(os.path.join(UPLOAD_DIR, save_name))
-    return jsonify({'url': f'/uploads/{save_name}', 'filename': file.filename})
+    ext, error = validate_upload(file, ATTACHMENT_EXTS, '附件只支持图片、PDF 或 Word 文档')
+    if error:
+        return jsonify({'error': error}), 400
+    _path, url = _store_upload(file, ext, 'attach')
+    return jsonify({'url': url, 'filename': file.filename})
 
 # questions
 @app.route('/api/questions', methods=['GET'])
@@ -1068,6 +1216,7 @@ name 必须是精简的知识点名称，控制在 12 个字以内，只写名�
     try:
         parsed = json.loads(call_llm(prompt, json_mode=True))
     except Exception as e:
+        logger.warning('知识溯源调用失败: %s', e)
         return jsonify({'error': f'溯源失败：{e}'}), 500
     trace = db.add_trace(qid, json.dumps(parsed, ensure_ascii=False))
     existing = {kp['name'] for kp in db.list_kps(q['subject_id'])}
@@ -1181,7 +1330,8 @@ def api_review_today():
             advice = call_llm(
                 f'你是错题复习助手。根据这些薄弱知识点给出今天 3 条简短复习建议，每条不超过 30 字：\n{names}'
             ).strip() or local_advice
-        except Exception:
+        except Exception as e:
+            logger.warning('复习建议 AI 生成失败，使用本地建议: %s', e)
             advice = local_advice
     return jsonify({
         'advice': advice,
@@ -1285,10 +1435,18 @@ def api_get_settings():
         'reminder_time': db.get_setting('reminder_time', '20:00')
     })
 
+SETTING_KEYS = {
+    'llm_api_key', 'llm_model', 'ocr_enabled', 'ocr_lang', 'ocr_use_orientation',
+    'ocr_confidence_threshold', 'kp_auto_threshold', 'kp_pending_threshold',
+    'reminder_enabled', 'reminder_time',
+}
+
 @app.route('/api/settings', methods=['POST'])
 def api_save_settings():
     body = request.get_json(force=True, silent=True) or {}
     for k, v in body.items():
+        if k not in SETTING_KEYS:
+            continue  # 忽略未知键，避免任意键写入
         db.set_setting(k, str(v))
     return jsonify({'ok': True})
 
@@ -1333,7 +1491,7 @@ def api_import_package():
                     with open(temp_path, 'wb') as f:
                         f.write(zf.read('data.db'))
                     try:
-                        data = db.read_sqlite_export(temp_path)
+                        data = db.read_sqlite_export(temp_path, uid)
                     finally:
                         try:
                             os.remove(temp_path)
@@ -1346,7 +1504,7 @@ def api_import_package():
             with open(temp_path, 'wb') as f:
                 f.write(raw)
             try:
-                data = db.read_sqlite_export(temp_path)
+                data = db.read_sqlite_export(temp_path, uid)
             finally:
                 try:
                     os.remove(temp_path)
@@ -1355,6 +1513,7 @@ def api_import_package():
         else:
             data = json.loads(raw.decode('utf-8'))
     except Exception as e:
+        logger.warning('备份包解析失败: %s', e)
         return jsonify({'error': f'备份解析失败：{e}'}), 400
     stats = db.import_user_data(uid, data)
     return jsonify({'ok': True, 'stats': stats})
@@ -1396,7 +1555,7 @@ def api_import_sqlite():
     path = os.path.join(UPLOAD_DIR, f'import_{os.urandom(5).hex()}.db')
     request.files['file'].save(path)
     try:
-        data = db.read_sqlite_export(path)
+        data = db.read_sqlite_export(path, uid)
         stats = db.import_user_data(uid, data)
         return jsonify({'ok': True, 'stats': stats})
     finally:
@@ -1413,11 +1572,13 @@ def api_upload_image():
     file = request.files['file']
     if not file or not file.filename:
         return jsonify({'error': 'no file'}), 400
-    ext = os.path.splitext(file.filename)[1] or '.jpg'
-    save_name = f"upload_{os.urandom(4).hex()}{ext}"
-    save_path = os.path.join(UPLOAD_DIR, save_name)
-    file.save(save_path)
-    return jsonify({'url': f'/uploads/{save_name}', 'filename': save_name})
+    ext, error = validate_upload(
+        file, IMAGE_EXTS, '只支持 jpg、jpeg、png、webp、bmp、gif 图片'
+    )
+    if error:
+        return jsonify({'error': error}), 400
+    _path, url = _store_upload(file, ext, 'upload')
+    return jsonify({'url': url, 'filename': os.path.basename(url)})
 
 def ocr_image(image_path):
     ocr = get_ocr()
@@ -1469,22 +1630,31 @@ def api_ocr():
     file = request.files['file']
     if not file or not file.filename:
         return jsonify({'error': 'no file'}), 400
-    ext = os.path.splitext(file.filename)[1] or '.jpg'
-    save_name = f"ocr_{os.urandom(4).hex()}{ext}"
-    save_path = os.path.join(UPLOAD_DIR, save_name)
-    file.save(save_path)
+    ext, error = validate_upload(
+        file, IMAGE_EXTS, '只支持 jpg、jpeg、png、webp、bmp、gif 图片'
+    )
+    if error:
+        return jsonify({'error': error}), 400
+    if not ocr_enabled():
+        # 前端会退回到 /api/upload_image，只保存图片不做识别
+        return jsonify({'error': 'OCR 已在设置中关闭'}), 400
     if not PADDLE_AVAILABLE:
-        return jsonify({'error': 'PaddleOCR not installed', 'url': f'/uploads/{save_name}'}), 503
+        return jsonify({'error': 'PaddleOCR not installed'}), 503
+    save_path, url = _store_upload(file, ext, 'ocr')
     try:
         text = ocr_image(save_path)
         return jsonify({
             'text': text,
-            'url': f'/uploads/{save_name}'
+            'url': url
         })
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e), 'url': f'/uploads/{save_name}'}), 500
+        logger.warning('OCR 识别失败，回退为仅保存图片: %s', e, exc_info=True)
+        # 识别失败时删除半成品，由前端重新走 upload_image 保存
+        try:
+            os.remove(save_path)
+        except OSError:
+            pass
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     db.init_db()

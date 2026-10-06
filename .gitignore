@@ -9,6 +9,7 @@ venv/
 data.db
 *.db
 *.db-journal
+data.db.bak_*
 secret.key
 backups/
 uploads/

@@ -264,6 +264,13 @@ class LearningResource(Base):
         }
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data.db')
+
+# 备份导入允许读取的表；表名会被拼进 SQL，因此必须白名单化
+EXPORT_TABLES = {
+    'subjects', 'knowledge_points', 'questions', 'question_kp', 'review_logs',
+    'settings', 'ai_materials', 'learning_resources', 'review_plans',
+    'knowledge_traces', 'mind_maps', 'kp_feedback',
+}
 engine = create_engine(f'sqlite:///{DB_PATH}', echo=False)
 SessionLocal = sessionmaker(bind=engine)
 
@@ -274,10 +281,28 @@ def _columns(table):
     insp = inspect(engine)
     return [c['name'] for c in insp.get_columns(table)]
 
+def _backup_before_migration():
+    """旧结构迁移会清空 users 表，迁移前留一份完整副本以便回退。"""
+    if not os.path.exists(DB_PATH):
+        return None
+    backup_dir = os.path.join(os.path.dirname(DB_PATH), 'backups')
+    os.makedirs(backup_dir, exist_ok=True)
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    target = os.path.join(backup_dir, f'pre_migration_{stamp}.db')
+    try:
+        shutil.copyfile(DB_PATH, target)
+        print(f'[db] legacy schema migration: backup written to {target}')
+        return target
+    except OSError as e:
+        print(f'[db] legacy migration backup failed: {e}')
+        return None
+
 def _migrate_legacy_schema():
     insp = inspect(engine)
     tables = set(insp.get_table_names())
     legacy = False
+    if tables and 'users' in tables and 'subjects' in tables and 'user_id' not in _columns('subjects'):
+        _backup_before_migration()
     with engine.begin() as conn:
         if 'subjects' in tables and 'user_id' not in _columns('subjects'):
             legacy = True
@@ -342,9 +367,13 @@ def claim_legacy_data(user_id):
                 {'uid': user_id}
             )
 
+def _ci_username(value):
+    """用户名统一按小写比较，避免 Demo 与 demo 被当成两个账号。"""
+    return func.lower(User.username) == (value or '').strip().lower()
+
 def get_user_by_username(username):
     session = get_session()
-    u = session.execute(select(User).where(User.username == username)).scalar_one_or_none()
+    u = session.execute(select(User).where(_ci_username(username))).scalar_one_or_none()
     result = u.to_dict() if u else None
     session.close()
     return result
@@ -359,7 +388,7 @@ def get_user(user_id):
 def get_user_password(username):
     session = get_session()
     row = session.execute(
-        select(User.password_hash).where(User.username == username)
+        select(User.password_hash).where(_ci_username(username))
     ).scalar_one_or_none()
     session.close()
     return row
@@ -393,7 +422,7 @@ def update_user_password(user_id, password_hash):
 def rename_user(user_id, new_username):
     session = get_session()
     exists = session.execute(
-        select(User).where(User.username == new_username, User.id != user_id)
+        select(User).where(_ci_username(new_username), User.id != user_id)
     ).scalar_one_or_none()
     if exists:
         session.close()
@@ -456,12 +485,38 @@ def add_subject(name, icon=''):
     return result
 
 def delete_subject(sid):
+    """删除学科并级联清理其下全部知识点、错题及关联数据。
+
+    SQLite 默认不启用外键约束，Subject 上的 ForeignKey 不会自动级联，
+    必须显式清理，否则会留下 subject_id 悬空的知识点与错题。
+    """
     uid = current_user_id()
     session = get_session()
     s = session.execute(select(Subject).where(Subject.id == sid, Subject.user_id == uid)).scalar_one_or_none()
-    if s:
-        session.delete(s)
-        session.commit()
+    if not s:
+        session.close()
+        return True
+    qids = session.execute(
+        select(Question.id).where(Question.user_id == uid, Question.subject_id == sid)
+    ).scalars().all()
+    kpids = session.execute(
+        select(KnowledgePoint.id).where(KnowledgePoint.user_id == uid, KnowledgePoint.subject_id == sid)
+    ).scalars().all()
+    if qids:
+        session.execute(delete(QuestionKP).where(QuestionKP.question_id.in_(qids)))
+        session.execute(delete(ReviewLog).where(ReviewLog.question_id.in_(qids)))
+        session.execute(delete(ReviewPlan).where(ReviewPlan.question_id.in_(qids)))
+        session.execute(delete(MindMap).where(MindMap.question_id.in_(qids)))
+        session.execute(delete(KnowledgeTrace).where(KnowledgeTrace.question_id.in_(qids)))
+        session.execute(delete(Question).where(Question.id.in_(qids), Question.user_id == uid))
+    if kpids:
+        session.execute(delete(QuestionKP).where(QuestionKP.kp_id.in_(kpids)))
+        session.execute(delete(AiMaterial).where(AiMaterial.kp_id.in_(kpids), AiMaterial.user_id == uid))
+        session.execute(delete(LearningResource).where(LearningResource.kp_id.in_(kpids), LearningResource.user_id == uid))
+        session.execute(delete(KpFeedback).where(KpFeedback.kp_id.in_(kpids)))
+        session.execute(delete(KnowledgePoint).where(KnowledgePoint.id.in_(kpids), KnowledgePoint.user_id == uid))
+    session.delete(s)
+    session.commit()
     session.close()
     return True
 
@@ -478,6 +533,9 @@ def list_kps(subject_id=None):
 
 def add_kp(subject_id, name, parent_id=None, level=0, description=''):
     uid = current_user_id()
+    name = (name or '').strip()
+    if not name:
+        raise ValueError('请输入知识点名称')
     session = get_session()
     if parent_id is not None:
         parent = session.execute(
@@ -553,8 +611,8 @@ def update_kp_description(kid, description):
     kp = session.execute(
         select(KnowledgePoint).where(KnowledgePoint.id == kid, KnowledgePoint.user_id == uid)
     ).scalar_one_or_none()
-    if kp and description:
-        kp.description = description
+    if kp:
+        kp.description = description or ''
         session.commit()
     session.close()
     return True
@@ -614,10 +672,18 @@ def get_question(qid):
 
 def _sync_kp_links(session, question, kp_list):
     session.execute(QuestionKP.__table__.delete().where(QuestionKP.question_id == question.id))
-    for kp in kp_list or []:
+    if not kp_list:
+        return
+    # 只允许绑定属于当前用户的知识点，避免通过构造 kp_id 关联到他人知识点
+    owned = set(session.execute(
+        select(KnowledgePoint.id).where(KnowledgePoint.user_id == question.user_id)
+    ).scalars().all())
+    seen = set()
+    for kp in kp_list:
         kid = kp.get('id')
-        if not kid:
+        if not kid or kid not in owned or kid in seen:
             continue
+        seen.add(kid)
         session.add(QuestionKP(
             question_id=question.id,
             kp_id=kid,
@@ -628,9 +694,22 @@ def _sync_kp_links(session, question, kp_list):
 def add_question(data):
     uid = current_user_id()
     session = get_session()
+    title_text = (data.get('title_text') or '').strip()
+    title_image = (data.get('title_image') or '').strip()
+    if not title_text and not title_image:
+        session.close()
+        raise ValueError('请输入题干文本或上传图片')
+    subject_id = data.get('subject_id')
+    if subject_id is not None:
+        subj = session.execute(
+            select(Subject).where(Subject.id == subject_id, Subject.user_id == uid)
+        ).scalar_one_or_none()
+        if not subj:
+            session.close()
+            raise ValueError('学科无效或不属于当前用户')
     q = Question(
         user_id=uid,
-        subject_id=data.get('subject_id'),
+        subject_id=subject_id,
         title_text=data.get('title_text', ''),
         title_image=data.get('title_image', ''),
         options=str(data.get('options', [])),
@@ -656,6 +735,19 @@ def update_question(qid, data):
     if not q:
         session.close()
         return None
+    # 编辑后仍需保证题干文本或图片至少留有一项
+    next_title = (data.get('title_text', q.title_text) or '').strip()
+    next_image = (data.get('title_image', q.title_image) or '').strip()
+    if not next_title and not next_image:
+        session.close()
+        raise ValueError('请输入题干文本或上传图片')
+    if 'subject_id' in data and data['subject_id'] is not None:
+        subj = session.execute(
+            select(Subject).where(Subject.id == data['subject_id'], Subject.user_id == uid)
+        ).scalar_one_or_none()
+        if not subj:
+            session.close()
+            raise ValueError('学科无效或不属于当前用户')
     for field in ['subject_id', 'title_text', 'title_image', 'options', 'user_answer',
                   'correct_answer', 'analysis', 'mistake_reason', 'status']:
         if field in data:
@@ -1047,9 +1139,39 @@ def delete_learning_resource(rid):
     return True
 
 # ---------- weak analysis ----------
+
+# 薄弱指数各因子的参考规模 k。归一化采用饱和函数 x/(x+k)：
+# 单调递增且上界为 1，因此指数既不随库内数据总量漂移（可跨时间比较），
+# 也不会像线性截断那样在高位产生并列。调整这些常数即可整体调节灵敏度。
+WEAK_Q_REF = 3.0          # 关联错题数参考规模
+WEAK_E_REF = 3.0          # 累计错误次数参考规模
+WEAK_D_REF = 2.0          # 时间衰减和参考规模
+WEAK_R_REF = 2.0          # 近 7 天错误次数参考规模
+WEAK_DECAY_DAYS = 30.0    # 时间衰减半衰尺度（天）
+
+
+def _saturate(value, ref):
+    """饱和归一化 x/(x+k)，返回值落在 [0, 1)。"""
+    value = max(float(value or 0), 0.0)
+    return value / (value + ref) if (value + ref) > 0 else 0.0
+
+
+def _weak_events(created, logs):
+    """返回一道错题的错误事件时间列表。
+
+    口径统一：已复习的错题只把“复习仍错(result=0)”计为错误事件；
+    从未复习的错题，以创建时间作为一次仍未解决的错误事件。
+    """
+    if logs:
+        return [rd for rd, result in logs if result == 0 and rd]
+    return [created] if created else []
+
+
 def weak_analysis(subject_id=None, top_n=10):
     uid = current_user_id()
     session = get_session()
+
+    # 1) 知识点 + 关联错题数 / 未掌握数
     q = select(
         KnowledgePoint, Subject.name.label('subject_name'),
         func.count(func.distinct(Question.id)).label('question_count'),
@@ -1065,61 +1187,65 @@ def weak_analysis(subject_id=None, top_n=10):
         q = q.where(KnowledgePoint.subject_id == subject_id)
     q = q.group_by(KnowledgePoint.id)
     rows = session.execute(q).all()
+
+    # 2) 一次取回全部“错题→知识点”映射及创建时间，避免逐知识点查询（N+1）
+    link_rows = session.execute(
+        select(QuestionKP.kp_id, Question.id, Question.created_at)
+        .join(Question, QuestionKP.question_id == Question.id)
+        .where(Question.user_id == uid, Question.deleted_at.is_(None))
+    ).all()
+    questions_by_kp = {}
+    qid_set = set()
+    seen_pairs = set()
+    for kp_id, qid, created in link_rows:
+        if (kp_id, qid) in seen_pairs:
+            continue
+        seen_pairs.add((kp_id, qid))
+        questions_by_kp.setdefault(kp_id, []).append((qid, created))
+        qid_set.add(qid)
+
+    # 3) 一次取回这些错题的全部复习记录
+    logs_by_qid = {}
+    if qid_set:
+        for qid, review_date, result in session.execute(
+            select(ReviewLog.question_id, ReviewLog.review_date, ReviewLog.result)
+            .where(ReviewLog.question_id.in_(qid_set))
+        ).all():
+            logs_by_qid.setdefault(qid, []).append((review_date, result))
+
     now = datetime.utcnow()
     base = []
     for kp, subject_name, qc, uc in rows:
-        qc = qc or 0
-        uc = uc or 0
-        qids = session.execute(
-            select(Question.id)
-            .join(QuestionKP, QuestionKP.question_id == Question.id)
-            .where(QuestionKP.kp_id == kp.id, Question.user_id == uid, Question.deleted_at.is_(None))
-        ).scalars().all()
-        logs = []
-        if qids:
-            logs = session.execute(
-                select(ReviewLog.review_date, ReviewLog.result)
-                .where(ReviewLog.question_id.in_(qids))
-            ).all()
-        error_count = 0
-        recent_errors = 0
+        events = []
+        for qid, created in questions_by_kp.get(kp.id, []):
+            events.extend(_weak_events(created, logs_by_qid.get(qid)))
         decay_score = 0.0
-        for review_date, result in logs:
-            if result != 0 or not review_date:
-                continue
-            error_count += 1
-            days = max((now - review_date).total_seconds() / 86400, 0)
-            decay_score += math.exp(-days / 30)
+        recent_errors = 0
+        for when in events:
+            days = max((now - when).total_seconds() / 86400, 0)
+            decay_score += math.exp(-days / WEAK_DECAY_DAYS)
             if days <= 7:
                 recent_errors += 1
-        if not logs and qids:
-            dates = session.execute(select(Question.created_at).where(Question.id.in_(qids))).scalars().all()
-            for created in dates:
-                if created:
-                    days = max((now - created).total_seconds() / 86400, 0)
-                    decay_score += math.exp(-days / 30)
         base.append({
             **kp.to_dict(),
             'subject_name': subject_name,
-            'question_count': qc,
-            'unmastered_count': uc,
-            'error_count': error_count,
+            'question_count': qc or 0,
+            'unmastered_count': uc or 0,
+            'error_count': len(events),
             'recent_errors': recent_errors,
             'decay_score': round(decay_score, 3)
         })
-    max_q = max([item['question_count'] for item in base] or [0]) or 1
-    max_e = max([item['error_count'] for item in base] or [0]) or 1
-    max_d = max([item['decay_score'] for item in base] or [0]) or 1
-    max_r = max([item['recent_errors'] for item in base] or [0]) or 1
+
+    # 固定参考规模归一化：新增错题不会改变既有知识点的指数
     for item in base:
         score = (
-            item['question_count'] / max_q * 0.4 +
-            item['error_count'] / max_e * 0.3 +
-            item['decay_score'] / max_d * 0.2 +
-            item['recent_errors'] / max_r * 0.1
+            _saturate(item['question_count'], WEAK_Q_REF) * 0.4 +
+            _saturate(item['error_count'], WEAK_E_REF) * 0.3 +
+            _saturate(item['decay_score'], WEAK_D_REF) * 0.2 +
+            _saturate(item['recent_errors'], WEAK_R_REF) * 0.1
         )
         item['weak_index'] = round(score * 10, 2)
-    base.sort(key=lambda x: x['weak_index'], reverse=True)
+    base.sort(key=lambda x: (-x['weak_index'], -x['question_count'], -x['unmastered_count']))
     session.close()
     return base[:top_n]
 
@@ -1158,12 +1284,15 @@ def kp_tree(subject_id):
     roots = sorted(children.get('s' + str(subject_id), []), key=lambda x: x['name'])
     for root in roots:
         visit(root)
+    # 一次聚合出每个知识点的错题数，避免逐节点查询（N+1）
+    counts = dict(session.execute(
+        select(QuestionKP.kp_id, func.count(func.distinct(Question.id)))
+        .join(Question, QuestionKP.question_id == Question.id)
+        .where(Question.user_id == uid, Question.deleted_at.is_(None))
+        .group_by(QuestionKP.kp_id)
+    ).all())
     for n in ordered:
-        c = session.execute(
-            select(func.count()).select_from(QuestionKP).join(Question)
-            .where(QuestionKP.kp_id == n['id'], Question.user_id == uid, Question.deleted_at.is_(None))
-        ).scalar()
-        n['question_count'] = c or 0
+        n['question_count'] = counts.get(n['id'], 0)
     session.close()
     return ordered
 
@@ -1234,30 +1363,73 @@ def export_user_sqlite(user_id):
     conn.close()
     return target
 
-def read_sqlite_export(path):
+def read_sqlite_export(path, user_id=None):
+    """读取备份文件。传入 user_id 时只读取该用户的数据，并剔除敏感设置项。
+
+    裸 SQLite 备份包可能来自任意账号或旧的全库导出，必须按 user_id 过滤，
+    否则导入方可看到他人错题与明文 API Key。
+    """
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
-    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    found = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    # 表名来自外部文件，必须限定在白名单内再拼进 SQL，避免被构造的表名注入
+    tables = {n for n in found if n in EXPORT_TABLES}
+    has_user_col = {}
+    for name in tables:
+        cols = {r[1] for r in conn.execute(f'PRAGMA table_info({name})').fetchall()}
+        has_user_col[name] = 'user_id' in cols
+
     def rows(name):
         if name not in tables:
             return []
+        if user_id is not None and has_user_col.get(name):
+            return [dict(r) for r in conn.execute(
+                f'SELECT * FROM {name} WHERE user_id=?', (user_id,)).fetchall()]
+        if user_id is not None:
+            return []  # 无 user_id 列的关联表由下面的 IN 子句按归属过滤
         return [dict(r) for r in conn.execute(f'SELECT * FROM {name}').fetchall()]
-    qids = [r['id'] for r in rows('questions')]
+
+    def child_rows(name):
+        if name not in tables:
+            return []
+        if user_id is None:
+            return [dict(r) for r in conn.execute(f'SELECT * FROM {name}').fetchall()]
+        if not qids:
+            return []
+        marks = ','.join('?' * len(qids))
+        return [dict(r) for r in conn.execute(
+            f'SELECT * FROM {name} WHERE question_id IN ({marks})', qids).fetchall()]
+
+    subjects = rows('subjects')
+    kps = rows('knowledge_points')
+    questions = rows('questions')
+    qids = [q['id'] for q in questions]
+    kpids = [k['id'] for k in kps]
+
+    settings = rows('settings')
+    if user_id is not None:
+        sensitive = {'llm_api_key'}
+        settings = [s for s in settings if s.get('key') not in sensitive]
+
     data = {
         'version': 1,
-        'subjects': rows('subjects'),
-        'knowledge_points': rows('knowledge_points'),
-        'questions': rows('questions'),
-        'question_kp': rows('question_kp'),
-        'review_logs': rows('review_logs'),
-        'settings': rows('settings'),
+        'subjects': subjects,
+        'knowledge_points': kps,
+        'questions': questions,
+        'question_kp': child_rows('question_kp'),
+        'review_logs': child_rows('review_logs'),
+        'settings': settings,
         'ai_materials': rows('ai_materials'),
         'learning_resources': rows('learning_resources'),
-        'review_plans': rows('review_plans'),
-        'knowledge_traces': rows('knowledge_traces'),
-        'mind_maps': rows('mind_maps'),
+        'review_plans': child_rows('review_plans'),
+        'knowledge_traces': child_rows('knowledge_traces'),
+        'mind_maps': child_rows('mind_maps'),
         'kp_feedback': rows('kp_feedback')
     }
+    if user_id is not None:
+        # 关联表按 kp 归属再过滤一次，去掉指向他人知识点的悬空关联
+        keep = set(kpids)
+        data['question_kp'] = [l for l in data['question_kp'] if l.get('kp_id') in keep]
     conn.close()
     return data
 

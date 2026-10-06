@@ -1,11 +1,20 @@
 const { createApp } = Vue;
 
+const SESSION_EXPIRED_FLAG = 'wrongbook_session_expired';
+
 axios.interceptors.response.use(
     r => r,
     err => {
         const url = (err.config && err.config.url) || '';
-        if (err.response && err.response.status === 401 && url.indexOf('/api/auth/') !== 0) {
-            window.location.reload();
+        const isAuthCall = url.indexOf('/api/auth/') === 0;
+        if (err.response && err.response.status === 401 && !isAuthCall) {
+            // 会话已失效：清掉本地与 Service Worker 的用户缓存。
+            // 必须只重载一次，否则每个失效请求都触发 reload，会形成刷新死循环。
+            clearCachedUserId();
+            if (!sessionStorage.getItem(SESSION_EXPIRED_FLAG)) {
+                sessionStorage.setItem(SESSION_EXPIRED_FLAG, '1');
+                window.location.reload();
+            }
         }
         return Promise.reject(err);
     }
@@ -90,6 +99,7 @@ const appOptions = {
             settings: {
                 llm_api_key: '',
                 llm_model: 'deepseek-chat',
+                ocr_enabled: 'true',
                 ocr_lang: 'ch',
                 ocr_use_orientation: 'true',
                 ocr_confidence_threshold: '0.5',
@@ -338,6 +348,7 @@ const appOptions = {
             try {
                 const res = await axios.get('/api/auth/me');
                 if (res.data.user) {
+                    sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
                     this.authUser = res.data.user;
                     setCachedUserId(this.authUser.id);
                     await this.init();
@@ -448,7 +459,10 @@ const appOptions = {
                 this.accountForm.old_password = '';
                 this.accountForm.new_password = '';
                 this.accountForm.confirm_password = '';
-                alert('密码已修改');
+                this.showAccountModal = false;
+                // 后端改密后会清空会话，需用新密码重新登录
+                alert('密码已修改，请使用新密码重新登录');
+                await this.switchUser();
             } catch (e) {
                 alert((e.response && e.response.data && e.response.data.error) || '修改失败');
             }
@@ -509,10 +523,14 @@ const appOptions = {
             }
         },
         openResetModal() {
-            this.resetPasswordForm = { username: '', new_password: '', confirm_password: '' };
+            this.resetPasswordForm = { username: '', old_password: '', new_password: '', confirm_password: '' };
             this.showResetModal = true;
         },
         async resetPassword() {
+            if (!this.resetPasswordForm.old_password) {
+                alert('请输入原密码');
+                return;
+            }
             if (this.resetPasswordForm.new_password !== this.resetPasswordForm.confirm_password) {
                 alert('两次输入的密码不一致');
                 return;
@@ -520,6 +538,7 @@ const appOptions = {
             try {
                 await axios.post('/api/auth/reset_password', {
                     username: this.resetPasswordForm.username,
+                    old_password: this.resetPasswordForm.old_password,
                     new_password: this.resetPasswordForm.new_password
                 });
                 this.showResetModal = false;
@@ -552,6 +571,7 @@ const appOptions = {
         async init() {
             this.loading = true;
             this.error = '';
+            let step = '学科列表';
             try {
                 await this.loadSubjects();
                 if (this.subjects.length && !this.form.subject_id) {
@@ -562,20 +582,33 @@ const appOptions = {
                     this.graphFilter.subject_id = this.subjects[0].id;
                     this.reportFilter.subject_id = this.subjects[0].id;
                 }
+                step = '知识点树';
                 await this.loadKnowledgePoints();
+                step = '错题列表';
                 await this.loadQuestions();
+                step = '错题分页';
                 await this.loadLibraryPage();
+                step = '薄弱分析';
                 await this.loadWeak();
+                step = '复习推荐';
                 await this.loadReview();
+                step = '复习计划';
                 await this.loadReviewPlans();
+                step = '知识图谱';
                 await this.loadGraph();
+                step = '统计报表';
                 await this.loadReport();
+                step = '系统设置';
                 await this.loadSettings();
                 this.setupReminderTimer();
                 this.$nextTick(() => this.renderMath());
             } catch (e) {
-                this.error = '数据加载失败：' + (e.message || e);
-                console.error(e);
+                // 指明失败的步骤与状态码，避免只看到一句无从下手的“数据加载失败”
+                const detail = e.response
+                    ? ('HTTP ' + e.response.status + ' ' + ((e.response.data && e.response.data.error) || ''))
+                    : (e.message || String(e));
+                this.error = '数据加载失败（' + step + '）：' + detail;
+                console.error('[init] failed at step: ' + step, e);
             } finally {
                 this.loading = false;
             }
@@ -1302,16 +1335,23 @@ const appOptions = {
         },
         async processImageFile(file) {
             if (!file) return;
-            const fd = new FormData();
-            fd.append('file', file);
             this.form.ocrLoading = true;
             try {
-                // 同时进行 OCR 识别和上传
-                const ocrRes = await axios.post('/api/ocr', fd);
-                if (ocrRes.data.text) {
-                    this.form.title_text = (this.form.title_text ? this.form.title_text + '\n' : '') + ocrRes.data.text;
+                if (String(this.settings.ocr_enabled) === 'false') {
+                    const fd2 = new FormData();
+                    fd2.append('file', file);
+                    const res = await axios.post('/api/upload_image', fd2);
+                    this.form.title_image = res.data.url;
+                } else {
+                    // 同时进行 OCR 识别和上传
+                    const fd = new FormData();
+                    fd.append('file', file);
+                    const ocrRes = await axios.post('/api/ocr', fd);
+                    if (ocrRes.data.text) {
+                        this.form.title_text = (this.form.title_text ? this.form.title_text + '\n' : '') + ocrRes.data.text;
+                    }
+                    this.form.title_image = ocrRes.data.url;
                 }
-                this.form.title_image = ocrRes.data.url;
             } catch (err) {
                 // OCR 失败时只上传图片
                 const fd2 = new FormData();
