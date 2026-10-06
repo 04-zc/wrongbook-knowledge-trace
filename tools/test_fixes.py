@@ -23,6 +23,7 @@ for st in ['CREATE INDEX IF NOT EXISTS idx_questions_user_deleted ON questions(u
 
 import app as webapp
 webapp.app.config['TESTING'] = True
+webapp.app.config['CSRF_ENABLED'] = False
 client = webapp.app.test_client()
 
 PASS, FAIL = [], []
@@ -180,6 +181,50 @@ r = client.post('/api/auth/logout')
 r = client.get('/api/auth/anything_else')
 anon = webapp.app.test_client().get('/api/auth/anything_else')
 check('unknown /api/auth/* path is NOT anonymously reachable', anon.status_code == 401, anon.status_code)
+
+# ---- FIX 11: CSRF token on state-changing requests ----
+webapp.app.config['CSRF_ENABLED'] = True
+csrf_client = webapp.app.test_client()
+r = csrf_client.post('/api/auth/login', json={'username': 'alice', 'password': 'final11'})
+csrf = body(r).get('csrf_token', '')
+check('login returns csrf token', r.status_code == 200 and len(csrf) >= 32, body(r))
+r = csrf_client.post('/api/subjects', json={'name': 'CSRF'})
+check('POST without csrf token rejected', r.status_code == 403, r.status_code)
+r = csrf_client.post('/api/subjects', json={'name': 'CSRF'}, headers={'X-CSRF-Token': csrf})
+check('POST with csrf token accepted', r.status_code == 200, r.data[:120])
+r = csrf_client.post('/api/subjects', json={'name': 'CSRF2'}, headers={'X-CSRF-Token': 'wrong-token'})
+check('wrong csrf token rejected', r.status_code == 403, r.status_code)
+webapp.app.config['CSRF_ENABLED'] = False
+
+# ---- FIX 12: login failure rate limit ----
+webapp.reset_login_attempts()
+rl_client = webapp.app.test_client()
+for _ in range(5):
+    rl_client.post('/api/auth/login', json={'username': 'rateuser', 'password': 'wrong11'})
+r = rl_client.post('/api/auth/login', json={'username': 'rateuser', 'password': 'wrong11'})
+check('login locked after repeated failures', r.status_code == 429, r.status_code)
+check('lock response has Retry-After header', bool(r.headers.get('Retry-After')),
+      r.headers.get('Retry-After'))
+webapp.reset_login_attempts()
+r = rl_client.post('/api/auth/login', json={'username': 'alice', 'password': 'final11'})
+check('login works after attempts reset', r.status_code == 200, r.status_code)
+webapp.reset_login_attempts()
+
+# ---- FIX 13: optimistic lock on concurrent edit ----
+client.post('/api/auth/login', json={'username': 'alice', 'password': 'final11'})
+lock_subj = body(client.post('/api/subjects', json={'name': 'Lock'}))['id']
+lock_q = body(client.post('/api/questions', json={'subject_id': lock_subj, 'title_text': 'v1'}))
+lock_qid = lock_q['id']
+v1 = lock_q['updated_at']
+r = client.put('/api/questions/%d' % lock_qid, json={'title_text': 'v2', 'expected_updated_at': v1})
+check('edit with matching version ok', r.status_code == 200, r.status_code)
+v2 = body(r).get('updated_at')
+r = client.put('/api/questions/%d' % lock_qid, json={'title_text': 'v3', 'expected_updated_at': v1})
+check('stale edit rejected with 409', r.status_code == 409, r.status_code)
+check('conflict returns current question',
+      body(r).get('current', {}).get('title_text') == 'v2', body(r).get('current'))
+r = client.put('/api/questions/%d' % lock_qid, json={'title_text': 'v3', 'expected_updated_at': v2})
+check('edit with refreshed version ok', r.status_code == 200, r.status_code)
 
 # ---- FIX 8: migration backup helper exists and is safe on empty dir ----
 check('migration backup helper callable', callable(db._backup_before_migration))

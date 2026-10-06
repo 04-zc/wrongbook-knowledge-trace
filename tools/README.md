@@ -12,6 +12,9 @@
 | `test_fixes.py` | 安全与稳定性回归：密码、会话、跨用户隔离、级联删除、上传校验、设置白名单 |
 | `test_round3.py` | 输入校验、用户名大小写、薄弱指数公式、Cookie、备份表白名单 |
 | `test_weak.py` | 薄弱指数算法回归：固定参考规模公式、错误事件口径、稳定性 |
+| `test_integration.py` | AI/OCR 调用链：mock 模型与 OCR 引擎，可选真实调用 |
+| `test_reports.py` | 报表逐页核对：Word 段落表格、PDF 每页文本、汇总接口一致性 |
+| `test_pwa_offline.js` | Service Worker 离线回归：缓存策略、上传文件隔离、版本升级清理 |
 
 运行方式：
 
@@ -20,6 +23,9 @@ python tools/e2e_check.py
 python tools/test_fixes.py
 python tools/test_round3.py
 python tools/test_weak.py
+python tools/test_integration.py
+python tools/test_reports.py
+node tools/test_pwa_offline.js
 ```
 
 ## 演示脚本

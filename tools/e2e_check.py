@@ -15,6 +15,7 @@ db.SessionLocal = sessionmaker(bind=db.engine)
 db.Base.metadata.create_all(db.engine)
 import app as webapp
 webapp.app.config['TESTING']=True
+webapp.app.config['CSRF_ENABLED']=False
 c = webapp.app.test_client()
 ok=[]
 def chk(n,cond,d=''): ok.append((n,bool(cond),d))

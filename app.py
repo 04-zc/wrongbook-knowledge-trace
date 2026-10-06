@@ -4,6 +4,10 @@ import os
 import io
 import json
 import re
+import hmac
+import secrets
+import time
+import threading
 import zipfile
 import requests
 import docx
@@ -145,10 +149,82 @@ else:
     with open(SECRET_FILE, 'wb') as f:
         f.write(app.secret_key)
 
-AUTH_PATHS = {
-    '/api/auth/register', '/api/auth/login', '/api/auth/logout',
-    '/api/auth/me', '/api/auth/reset_password',
-}
+# 未登录也允许访问的接口。logout/me 不在此列，交给下面按会话状态处理。
+PUBLIC_PATHS = {'/api/auth/register', '/api/auth/login', '/api/auth/reset_password'}
+# 这些接口发生在登录前，没有可用的会话 Token，因此不做 CSRF 校验
+CSRF_EXEMPT_PATHS = set(PUBLIC_PATHS)
+CSRF_SAFE_METHODS = {'GET', 'HEAD', 'OPTIONS'}
+
+
+def _ensure_csrf_token():
+    token = session.get('csrf_token')
+    if not token:
+        token = secrets.token_hex(32)
+        session['csrf_token'] = token
+    return token
+
+
+def _csrf_token_valid():
+    sent = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token') or ''
+    expected = session.get('csrf_token') or ''
+    return bool(expected) and hmac.compare_digest(str(sent), str(expected))
+
+
+# 同一账号 + IP 连续失败达到上限后短暂锁定，防止暴力尝试
+LOGIN_MAX_FAILURES = 5
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_LOCK_SECONDS = 5 * 60
+_login_attempts = {}
+_login_lock = threading.Lock()
+
+
+def _attempt_key(scope, username):
+    account = (username or '').strip().lower()
+    return f'{scope}:{account}:{request.remote_addr or ""}'
+
+
+def _locked_seconds(key):
+    now = time.time()
+    with _login_lock:
+        state = _login_attempts.get(key)
+        if not state:
+            return 0
+        locked_until = state.get('locked_until', 0)
+        if locked_until > now:
+            return max(int(locked_until - now) + 1, 1)
+        return 0
+
+
+def _record_login_failure(key):
+    now = time.time()
+    with _login_lock:
+        state = _login_attempts.get(key)
+        if not state or now - state.get('first', now) > LOGIN_WINDOW_SECONDS:
+            state = {'count': 0, 'first': now, 'locked_until': 0}
+        state['count'] += 1
+        if state['count'] >= LOGIN_MAX_FAILURES:
+            state['locked_until'] = now + LOGIN_LOCK_SECONDS
+        _login_attempts[key] = state
+        return state['count']
+
+
+def _clear_login_failures(key):
+    with _login_lock:
+        _login_attempts.pop(key, None)
+
+
+def reset_login_attempts():
+    """测试与排障用：清空内存中的失败计数。"""
+    with _login_lock:
+        _login_attempts.clear()
+
+
+def _too_many_attempts_response(retry_after):
+    resp = jsonify({'error': f'失败次数过多，请 {retry_after} 秒后再试'})
+    resp.status_code = 429
+    resp.headers['Retry-After'] = str(retry_after)
+    return resp
+
 
 @app.before_request
 def require_login():
@@ -158,13 +234,23 @@ def require_login():
         or request.path in ('/', '/manifest.webmanifest', '/sw.js')
     ):
         return None
-    if request.path in AUTH_PATHS:
-        return None
     if request.method == 'OPTIONS':
         return None
+    if request.path in PUBLIC_PATHS:
+        return None
     if 'user_id' not in session:
+        if request.path == '/api/auth/logout':
+            return jsonify({'ok': True})
         return jsonify({'error': '未登录', 'auth_required': True}), 401
     db.set_current_user(session.get('user_id'))
+    _ensure_csrf_token()
+    if (
+        app.config.get('CSRF_ENABLED', True)
+        and request.method not in CSRF_SAFE_METHODS
+        and request.path not in CSRF_EXEMPT_PATHS
+        and not _csrf_token_valid()
+    ):
+        return jsonify({'error': '安全校验失败，请刷新页面后重试', 'csrf_required': True}), 403
     return None
 
 @app.errorhandler(ValueError)
@@ -177,6 +263,15 @@ def handle_value_error(e):
 def handle_request_too_large(e):
     limit_mb = MAX_UPLOAD_BYTES // (1024 * 1024)
     return jsonify({'error': f'文件或请求过大，上限 {limit_mb} MB'}), 413
+
+
+@app.errorhandler(db.ConflictError)
+def handle_conflict_error(e):
+    return jsonify({
+        'error': str(e),
+        'conflict': True,
+        'current': getattr(e, 'current', None)
+    }), 409
 
 @app.after_request
 def add_cors(resp):
@@ -461,7 +556,10 @@ def auth_me():
     if not u:
         session.clear()
         return jsonify({'user': None}), 401
-    return jsonify({'user': {'id': u['id'], 'username': u['username']}})
+    return jsonify({
+        'user': {'id': u['id'], 'username': u['username']},
+        'csrf_token': _ensure_csrf_token()
+    })
 
 @app.route('/api/auth/register', methods=['POST'])
 def auth_register():
@@ -481,23 +579,36 @@ def auth_register():
         db.claim_legacy_data(u['id'])
     session['user_id'] = u['id']
     session['username'] = u['username']
-    return jsonify({'user': {'id': u['id'], 'username': u['username']}})
+    return jsonify({
+        'user': {'id': u['id'], 'username': u['username']},
+        'csrf_token': _ensure_csrf_token()
+    })
 
 @app.route('/api/auth/login', methods=['POST'])
 def auth_login():
     body = request.get_json(force=True, silent=True) or {}
     username = (body.get('username') or '').strip()
     password = body.get('password') or ''
+    key = _attempt_key('login', username)
+    retry_after = _locked_seconds(key)
+    if retry_after:
+        return _too_many_attempts_response(retry_after)
     u = db.get_user_by_username(username)
     if not u:
+        _record_login_failure(key)
         return jsonify({'error': '账号不存在'}), 400
     stored_hash = db.get_user_password(username)
     if not check_password_hash(stored_hash, password):
+        _record_login_failure(key)
         return jsonify({'error': '密码不正确'}), 400
+    _clear_login_failures(key)
     session['user_id'] = u['id']
     session['username'] = u['username']
     db.set_current_user(u['id'])
-    return jsonify({'user': {'id': u['id'], 'username': u['username']}})
+    return jsonify({
+        'user': {'id': u['id'], 'username': u['username']},
+        'csrf_token': _ensure_csrf_token()
+    })
 
 @app.route('/api/auth/logout', methods=['POST'])
 def auth_logout():
@@ -530,12 +641,19 @@ def auth_reset_password():
     new = body.get('new_password') or ''
     if not re.fullmatch(r'[A-Za-z0-9]{6,20}', new):
         return jsonify({'error': '新密码只能是 6-20 位英文字母或数字'}), 400
+    key = _attempt_key('reset', username)
+    retry_after = _locked_seconds(key)
+    if retry_after:
+        return _too_many_attempts_response(retry_after)
     user = db.get_user_by_username(username)
     if not user:
+        _record_login_failure(key)
         return jsonify({'error': '账号不存在'}), 404
     stored = db.get_user_password_by_id(user['id'])
     if not stored or not check_password_hash(stored, old):
+        _record_login_failure(key)
         return jsonify({'error': '原密码不正确'}), 400
+    _clear_login_failures(key)
     db.update_user_password(user['id'], generate_password_hash(new))
     session.clear()
     return jsonify({'ok': True})

@@ -1,12 +1,37 @@
 const { createApp } = Vue;
 
 const SESSION_EXPIRED_FLAG = 'wrongbook_session_expired';
+let csrfToken = '';
+
+function rememberCsrfToken(data) {
+    if (data && data.csrf_token) {
+        csrfToken = data.csrf_token;
+    }
+}
+
+axios.interceptors.request.use(config => {
+    const method = (config.method || 'get').toLowerCase();
+    if (csrfToken && ['post', 'put', 'delete', 'patch'].indexOf(method) !== -1) {
+        config.headers = config.headers || {};
+        config.headers['X-CSRF-Token'] = csrfToken;
+    }
+    return config;
+});
 
 axios.interceptors.response.use(
-    r => r,
+    r => {
+        rememberCsrfToken(r.data);
+        return r;
+    },
     err => {
         const url = (err.config && err.config.url) || '';
         const isAuthCall = url.indexOf('/api/auth/') === 0;
+        const data = (err.response && err.response.data) || {};
+        if (err.response && err.response.status === 403 && data.csrf_required && err.config && !err.config.__csrfRetried) {
+            // Token 过期或轮换时刷新一次，然后重放原请求
+            err.config.__csrfRetried = true;
+            return axios.get('/api/auth/me').then(() => axios(err.config));
+        }
         if (err.response && err.response.status === 401 && !isAuthCall) {
             // 会话已失效：清掉本地与 Service Worker 的用户缓存。
             // 必须只重载一次，否则每个失效请求都触发 reload，会形成刷新死循环。
@@ -1781,10 +1806,16 @@ const appOptions = {
                 return;
             }
             if (!confirm('确认保存这道错题？')) return;
-            if (this.form.id) {
-                await axios.put(`/api/questions/${this.form.id}`, this.form);
-            } else {
-                await axios.post('/api/questions', this.form);
+            try {
+                if (this.form.id) {
+                    await axios.put(`/api/questions/${this.form.id}`, this.form);
+                } else {
+                    await axios.post('/api/questions', this.form);
+                }
+            } catch (err) {
+                const data = (err.response && err.response.data) || {};
+                alert(data.error || '保存失败，请重试');
+                return;
             }
             alert('保存成功');
             this.resetForm();
@@ -1885,6 +1916,8 @@ const appOptions = {
         },
         editQuestion(q) {
             this.form = JSON.parse(JSON.stringify(q));
+            // 记录读取时的版本，提交时用于发现其他标签页的修改
+            this.form.expected_updated_at = q.updated_at || '';
             this.showEditModal = true;
         },
         closeEditModal() {
@@ -1897,7 +1930,13 @@ const appOptions = {
                 return;
             }
             if (!confirm('确认保存这次修改？')) return;
-            await axios.put(`/api/questions/${this.form.id}`, this.form);
+            try {
+                await axios.put(`/api/questions/${this.form.id}`, this.form);
+            } catch (err) {
+                const data = (err.response && err.response.data) || {};
+                alert(data.error || '修改失败，请重试');
+                return;
+            }
             this.showEditModal = false;
             this.form = this.emptyForm();
             await this.loadQuestions();

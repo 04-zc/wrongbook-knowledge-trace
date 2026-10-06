@@ -13,9 +13,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 db.engine = create_engine('sqlite:///' + db.DB_PATH)
 db.SessionLocal = sessionmaker(bind=db.engine)
+db.configure_engine(db.engine)
 db.Base.metadata.create_all(db.engine)
 import app as webapp
 webapp.app.config['TESTING'] = True
+webapp.app.config['CSRF_ENABLED'] = False
 c = webapp.app.test_client()
 PASS, FAIL = [], []
 def chk(n, cond, d=''):
@@ -93,6 +95,15 @@ chk('kp_tree nodes carry question_count', all('question_count' in n for n in t))
 appconf = webapp.app.config
 chk('SESSION_COOKIE_SAMESITE is Lax', appconf.get('SESSION_COOKIE_SAMESITE') == 'Lax', appconf.get('SESSION_COOKIE_SAMESITE'))
 chk('SESSION_COOKIE_HTTPONLY on', appconf.get('SESSION_COOKIE_HTTPONLY') is True)
+
+# --- sqlite WAL and lock handling ---
+with db.engine.connect() as conn:
+    journal_mode = conn.exec_driver_sql('PRAGMA journal_mode').scalar()
+    busy_timeout = conn.exec_driver_sql('PRAGMA busy_timeout').scalar()
+    synchronous = conn.exec_driver_sql('PRAGMA synchronous').scalar()
+chk('sqlite WAL enabled', str(journal_mode).lower() == 'wal', journal_mode)
+chk('sqlite busy_timeout set', int(busy_timeout) == 5000, busy_timeout)
+chk('sqlite synchronous NORMAL', int(synchronous) == 1, synchronous)
 
 # --- backup round trip still works with table whitelist ---
 c.post('/api/auth/login', json={'username':'alice','password':'pass11'})

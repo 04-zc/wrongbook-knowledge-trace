@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import os
 import math
-import shutil
 import sqlite3
 import uuid
 import contextvars
@@ -10,7 +9,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, DateTime,
     ForeignKey, Boolean, Float, select, func, case, delete,
-    UniqueConstraint, inspect, text
+    UniqueConstraint, inspect, text, event
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, joinedload
 
@@ -22,6 +21,15 @@ def current_user_id():
 
 def set_current_user(uid):
     _current_user.set(uid)
+
+
+class ConflictError(Exception):
+    """乐观锁冲突：记录已被其他窗口或标签页修改。"""
+
+    def __init__(self, message, current=None):
+        super().__init__(message)
+        self.current = current
+
 
 class User(Base):
     __tablename__ = 'users'
@@ -271,7 +279,27 @@ EXPORT_TABLES = {
     'settings', 'ai_materials', 'learning_resources', 'review_plans',
     'knowledge_traces', 'mind_maps', 'kp_feedback',
 }
-engine = create_engine(f'sqlite:///{DB_PATH}', echo=False)
+
+def configure_engine(target_engine):
+    """为 SQLite 打开 WAL、忙等待和折中同步级别。
+
+    WAL 让读取和写入在多数情况下互不阻塞；busy_timeout 让写锁冲突时
+    先等待而不是立刻抛 “database is locked”；NORMAL 在 WAL 下兼顾
+    安全与写入速度。
+    """
+    @event.listens_for(target_engine, 'connect')
+    def _set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute('PRAGMA journal_mode=WAL')
+        cursor.execute('PRAGMA busy_timeout=5000')
+        cursor.execute('PRAGMA synchronous=NORMAL')
+        cursor.close()
+    return target_engine
+
+
+engine = configure_engine(create_engine(
+    f'sqlite:///{DB_PATH}', echo=False, connect_args={'timeout': 10}
+))
 SessionLocal = sessionmaker(bind=engine)
 
 def get_session():
@@ -290,10 +318,17 @@ def _backup_before_migration():
     stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     target = os.path.join(backup_dir, f'pre_migration_{stamp}.db')
     try:
-        shutil.copyfile(DB_PATH, target)
+        # WAL 模式下不能只复制主库文件，必须用备份 API 才能包含尚未 checkpoint 的数据
+        source = sqlite3.connect(DB_PATH)
+        destination = sqlite3.connect(target)
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+            source.close()
         print(f'[db] legacy schema migration: backup written to {target}')
         return target
-    except OSError as e:
+    except (OSError, sqlite3.Error) as e:
         print(f'[db] legacy migration backup failed: {e}')
         return None
 
@@ -735,6 +770,13 @@ def update_question(qid, data):
     if not q:
         session.close()
         return None
+    # 乐观锁：调用方带回读取时的 updated_at，版本不一致说明另一窗口已改过
+    expected_version = (data.get('expected_updated_at') or '').strip()
+    current_version = q.updated_at.isoformat() if q.updated_at else ''
+    if expected_version and current_version != expected_version:
+        current = q.to_dict()
+        session.close()
+        raise ConflictError('这道题已在其他窗口被修改，请刷新后重试', current)
     # 编辑后仍需保证题干文本或图片至少留有一项
     next_title = (data.get('title_text', q.title_text) or '').strip()
     next_image = (data.get('title_image', q.title_image) or '').strip()
@@ -754,6 +796,11 @@ def update_question(qid, data):
             setattr(q, field, data[field])
     if 'knowledge_points' in data:
         _sync_kp_links(session, q, data['knowledge_points'])
+    # 任何修改都推进版本号，只改知识点关联也能被冲突检测发现
+    now = datetime.utcnow()
+    if q.updated_at and now <= q.updated_at:
+        now = q.updated_at + timedelta(microseconds=1)
+    q.updated_at = now
     session.commit()
     result = q.to_dict()
     session.close()
@@ -1331,7 +1378,14 @@ def export_user_data(user_id):
 def export_user_sqlite(user_id):
     os.makedirs(os.path.join(os.path.dirname(DB_PATH), 'backups'), exist_ok=True)
     target = os.path.join(os.path.dirname(DB_PATH), 'backups', f'backup_{user_id}_{uuid.uuid4().hex[:8]}.db')
-    shutil.copyfile(DB_PATH, target)
+    # 使用 SQLite 备份 API，保证 WAL 中未落盘的数据也进入备份
+    source = sqlite3.connect(DB_PATH)
+    destination = sqlite3.connect(target)
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
     conn = sqlite3.connect(target)
     qids = [r[0] for r in conn.execute('SELECT id FROM questions WHERE user_id=?', (user_id,)).fetchall()]
     kpids = [r[0] for r in conn.execute('SELECT id FROM knowledge_points WHERE user_id=?', (user_id,)).fetchall()]
