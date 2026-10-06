@@ -65,7 +65,7 @@ def build_manual():
     doc.add_paragraph('错题库采用后端分页，首页只加载最近错题和汇总数量，数据库查询增加索引。概念回顾、知识点精要和单题 AI 解答使用流式输出，内容逐步显示。')
 
     doc.add_heading('16. 使用限制', 1)
-    doc.add_paragraph('拍照识别需要本机安装 PaddleOCR 和 PaddlePaddle；AI 推荐、知识溯源和 AI 学习内容需要配置大模型 API Key。PWA 安装与系统通知需要 localhost 或 HTTPS，浏览器通知只在页面打开时检查。回收站中的错题不会自动过期删除，需要手动彻底删除。上传接口限制扩展名、文件头特征和 32 MB 请求体上限，访问上传文件需要先登录；文件头校验不能替代完整的病毒扫描和深度格式解析。')
+    doc.add_paragraph('拍照识别需要本机安装 PaddleOCR 和 PaddlePaddle；AI 推荐、知识溯源和 AI 学习内容需要配置大模型 API Key。PWA 安装与系统通知需要 localhost 或 HTTPS，浏览器通知只在页面打开时检查。回收站中的错题不会自动过期删除，需要手动彻底删除。上传接口限制扩展名、文件头特征和 32 MB 请求体上限，访问上传文件需要先登录；文件头校验不能替代完整的病毒扫描和深度格式解析。系统已启用会话级 CSRF 校验、登录失败限速和 SQLite WAL 忙等待保护；同一道题在多标签页同时编辑时使用版本校验，过期提交会被拒绝，请刷新页面后重试。')
 
     out = os.path.join(DOCS, '软件使用说明.docx')
     doc.save(out)
@@ -127,7 +127,7 @@ def build_modules():
     doc.add_paragraph('questions.deleted_at 是软删除标记。字段为空表示正常错题，非空表示已进入回收站；当前版本不自动按时间清理回收站。')
 
     doc.add_heading('20. 实现边界与已知限制', 2)
-    doc.add_paragraph('OCR 依赖本机 PaddleOCR 和 PaddlePaddle；大模型功能依赖用户配置的 API Key。PWA 完整安装和系统通知需要 localhost 或 HTTPS，浏览器通知只在页面打开时检查。SQLite 适合单机个人使用，不适合多机或高并发部署。上传接口已限制扩展名和文件头特征，并设置单个请求体 32 MB 上限；图片、附件和 OCR 文件按用户分目录存放，访问上传文件需要先登录。文件头校验只能拦截扩展名与内容明显不符的文件，不能替代完整的病毒扫描和深度格式解析。会话 Cookie 已启用 SameSite=Lax 与 HttpOnly；若部署到公网，仍建议启用 HTTPS（设置环境变量 WRONGBOOK_HTTPS=1 打开 Secure Cookie）。')
+    doc.add_paragraph('OCR 依赖本机 PaddleOCR 和 PaddlePaddle；大模型功能依赖用户配置的 API Key。PWA 完整安装和系统通知需要 localhost 或 HTTPS，浏览器通知只在页面打开时检查。SQLite 适合单机个人使用，不适合多机或高并发部署。上传接口已限制扩展名和文件头特征，并设置单个请求体 32 MB 上限；图片、附件和 OCR 文件按用户分目录存放，访问上传文件需要先登录。文件头校验只能拦截扩展名与内容明显不符的文件，不能替代完整的病毒扫描和深度格式解析。会话 Cookie 已启用 SameSite=Lax 与 HttpOnly，并增加会话级 CSRF Token；登录和重置密码有失败次数限速。SQLite 启用 WAL、busy_timeout 和写锁等待，备份改用 SQLite backup API。错题编辑使用 updated_at 版本校验，多标签页过期提交返回 409。若部署到公网，仍建议启用 HTTPS（设置环境变量 WRONGBOOK_HTTPS=1 打开 Secure Cookie）。')
 
     out = os.path.join(DOCS, '功能模块说明.docx')
     doc.save(out)
