@@ -2280,3 +2280,103 @@ body { background: var(--bg); color: var(--text); font-size: 14px; }
         padding: 28px 20px;
     }
 }
+
+/* ============================================================
+   v4：登录页左右分屏 + 右侧清晰表单外框
+   依据 UI/UX Pro Max：Minimalism & Swiss + SaaS 蓝
+   ============================================================ */
+.auth-page {
+    min-height: 100dvh;
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    align-items: stretch;
+    justify-content: normal;
+    padding: 0;
+    background: #f8fafc;
+}
+.auth-brand {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 18px;
+    padding: 64px 56px;
+    background: #1e3a8a;
+    color: #ffffff;
+}
+.auth-brand-logo {
+    margin-bottom: 6px;
+}
+.auth-brand h1 {
+    font-size: 30px;
+    line-height: 1.25;
+    margin: 0;
+    color: #ffffff;
+}
+.auth-brand-desc {
+    color: rgba(255, 255, 255, 0.82);
+    max-width: 42ch;
+    line-height: 1.7;
+    margin: 0;
+}
+.auth-brand-points {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.auth-brand-points li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: rgba(255, 255, 255, 0.92);
+}
+.auth-brand-points .ui-icon {
+    width: 20px;
+    height: 20px;
+}
+.auth-form-panel {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    background: #f8fafc;
+}
+.auth-card {
+    width: 100%;
+    max-width: 420px;
+    background: #ffffff;
+    border: 2px solid #94a3b8;
+    border-radius: 8px;
+    padding: 40px 36px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+.auth-card-head {
+    align-items: flex-start;
+    text-align: left;
+    margin-bottom: 20px;
+}
+.auth-card-head h2 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0;
+    color: #202124;
+}
+.auth-card-head p {
+    margin: 0;
+    color: #5f6368;
+    font-size: 13px;
+}
+@media (max-width: 900px) {
+    .auth-page {
+        grid-template-columns: 1fr;
+    }
+    .auth-brand {
+        display: none;
+    }
+    .auth-form-panel {
+        padding: 32px 16px;
+        align-items: flex-start;
+    }
+}
