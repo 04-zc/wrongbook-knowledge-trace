@@ -2324,10 +2324,11 @@ const AppLogo = {
     template: `
         <svg :width="size" :height="size" viewBox="0 0 48 48" fill="none" role="img" aria-label="错题本知识溯源整理助手">
             <rect x="2" y="2" width="44" height="44" rx="11" fill="#1e3a8a"/>
-            <path d="M16 11h11l7 7v19a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2z" fill="#ffffff"/>
-            <path d="M27 11l7 7h-7z" fill="#bfdbfe"/>
-            <path d="M18 24h11M18 29h6" stroke="#93c5fd" stroke-width="2" stroke-linecap="round"/>
-            <path d="M30 30l3 3 5-6" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M11 17.5c4.4-2 8.6-2 12.5 0v16c-3.9-1.7-8.1-1.7-12.5 0V17.5z" fill="#ffffff"/>
+            <path d="M24.5 17.5c3.9-2 8.1-2 12.5 0v16c-4.4-1.7-8.6-1.7-12.5 0V17.5z" fill="#c7d2fe"/>
+            <circle cx="16" cy="25" r="2.2" fill="#34d399"/>
+            <circle cx="32" cy="25" r="2.2" fill="#34d399"/>
+            <path d="M18.2 25h11.6" stroke="#34d399" stroke-width="1.8" stroke-linecap="round"/>
         </svg>`
 };
 

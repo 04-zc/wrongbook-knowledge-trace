@@ -24,21 +24,13 @@
 <div id="app">
     <!-- 登录 / 注册 -->
     <div v-if="!authUser" class="auth-page">
-        <section class="auth-brand">
-            <div class="auth-brand-mark"><app-logo :size="56"></app-logo></div>
-            <h1>错题本知识溯源整理助手</h1>
-            <p class="auth-brand-desc">记录错题、定位薄弱知识点、规划复习，形成从整理到掌握的完整闭环。</p>
-            <ul class="auth-brand-points">
-                <li><ui-icon name="scan-text"></ui-icon><span>拍照与 PDF / DOCX 自动识别</span></li>
-                <li><ui-icon name="git-branch"></ui-icon><span>知识溯源定位错误根因</span></li>
-                <li><ui-icon name="chart-line"></ui-icon><span>薄弱分析与复习计划</span></li>
-            </ul>
-        </section>
-        <section class="auth-form-panel">
-            <div class="auth-card">
-                <form class="auth-form" @submit.prevent="submitAuth">
-                    <h2>{{ authMode === 'login' ? '登录' : '注册' }}</h2>
-                    <p class="auth-sub">{{ authMode === 'login' ? '登录账号继续整理错题' : '创建账号开始整理错题' }}</p>
+        <div class="auth-card">
+            <div class="auth-card-head">
+                <app-logo :size="44"></app-logo>
+                <h1>错题本知识溯源整理助手</h1>
+                <p>{{ authMode === 'login' ? '登录账号继续整理错题' : '创建账号开始整理错题' }}</p>
+            </div>
+            <form class="auth-form" @submit.prevent="submitAuth">
                     <label class="field">
                         <span>账号</span>
                         <input v-model.trim="authUsername" type="text" placeholder="英文或数字" autocomplete="username">
@@ -60,9 +52,8 @@
                     </button>
                     <button type="button" class="auth-switch" v-if="authMode === 'login'" @click="openResetModal">忘记密码？重置密码</button>
                     <p class="auth-rule">账号和密码只能使用英文字母和数字</p>
-                </form>
-            </div>
-        </section>
+            </form>
+        </div>
     </div>
 
     <template v-else>
@@ -83,13 +74,16 @@
                     <div class="nav-group-label">{{ group.name }}</div>
                     <button v-for="nav in group.items" :key="nav.key" :class="{active: isNavActive(nav)}" @click="goTo(nav.key)">
                         <ui-icon :name="nav.icon"></ui-icon>
-                        <span>{{ nav.label }}</span>
+                        <span class="nav-label">{{ nav.label }}</span>
                         <span v-if="nav.key==='review' && reviewPlanCounts.total" class="nav-badge">{{ reviewPlanCounts.total }}</span>
                     </button>
                 </template>
             </nav>
             <div class="side-user">
-                <div class="side-username">{{ authUser.username }}</div>
+                <div class="side-account">
+                    <div class="side-avatar">{{ (authUser.username || '?').charAt(0).toUpperCase() }}</div>
+                    <div class="side-username">{{ authUser.username }}</div>
+                </div>
                 <button type="button" @click="openLlmConfig"><ui-icon name="settings-2"></ui-icon>模型与 OCR 配置</button>
                 <button type="button" @click="openAccountModal"><ui-icon name="user"></ui-icon>账号设置</button>
                 <button type="button" @click="switchUser"><ui-icon name="log-out"></ui-icon>切换用户</button>
