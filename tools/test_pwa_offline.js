@@ -126,8 +126,8 @@ async function requestThroughWorker(url) {
 
 (async () => {
     await fire('install', {});
-    const shell = cacheStores.get('wrongbook-shell-v5');
-    check('安装时写入 v5 外壳缓存',
+    const shell = cacheStores.get('wrongbook-shell-v6');
+    check('安装时写入 v6 外壳缓存',
         Boolean(shell && shell.store.has('/static/app.js')));
 
     fetchCalls = [];
@@ -136,13 +136,13 @@ async function requestThroughWorker(url) {
     check('上传文件不触发网络或缓存写入', fetchCalls.length === 0);
 
     await fire('message', { data: { type: 'SET_USER', userId: '1' } });
-    if (!cacheStores.has('wrongbook-user-1-v5')) {
-        cacheStores.set('wrongbook-user-1-v5', new FakeCache());
+    if (!cacheStores.has('wrongbook-user-1-v6')) {
+        cacheStores.set('wrongbook-user-1-v6', new FakeCache());
     }
     fetchCalls = [];
     fetchImpl = () => Promise.resolve(new FakeResponse('me-json'));
     const meResponse = await requestThroughWorker('http://localhost:5000/api/auth/me');
-    const userCache = cacheStores.get('wrongbook-user-1-v5');
+    const userCache = cacheStores.get('wrongbook-user-1-v6');
     check('/api/auth/me 走网络', Boolean(meResponse) && meResponse.body === 'me-json');
     check('/api/auth/me 不写入缓存',
         !(userCache && userCache.store.has('http://localhost:5000/api/auth/me')));
@@ -163,8 +163,8 @@ async function requestThroughWorker(url) {
     await fire('activate', {});
     check('升级时清理 v4 外壳缓存', !cacheStores.has('wrongbook-shell-v4'));
     check('升级时清理旧用户缓存', !cacheStores.has('wrongbook-user-9-v4'));
-    check('升级后保留 v5 缓存',
-        cacheStores.has('wrongbook-shell-v5') && cacheStores.has('wrongbook-user-1-v5'));
+    check('升级后保留 v6 缓存',
+        cacheStores.has('wrongbook-shell-v6') && cacheStores.has('wrongbook-user-1-v6'));
 
     console.log('=== PASS (' + PASS.length + ') ===');
     PASS.forEach(name => console.log('  ok  ' + name));

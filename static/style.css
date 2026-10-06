@@ -1778,3 +1778,284 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .dir-add-line { display: flex; gap: 8px; flex-wrap: wrap; }
 .dir-add-line input { flex: 1; min-width: 180px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; }
 .dir-add-line input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37,99,235,0.14); }
+
+/* ============================================================
+   v2 设计系统覆盖层（2026-10）
+   目标：中性灰底 + 单一蓝色强调色 + 统一焦点与间距
+   ============================================================ */
+:root {
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --danger: #dc2626;
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #111827;
+    --text-secondary: #4b5563;
+    --muted: #6b7280;
+    --border: #e4e7ec;
+    --surface-muted: #f2f4f7;
+    --primary-soft: #eff6ff;
+    --success: #059669;
+    --warning: #b45309;
+    --focus: #2563eb;
+    --radius-control: 6px;
+    --radius-card: 8px;
+    --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.08);
+}
+body { background: var(--bg); color: var(--text); font-size: 14px; }
+*:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.ui-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none; }
+.ui-icon svg { display: block; }
+
+/* 按钮统一 */
+.btn,
+.btn-primary,
+.upload-btn,
+.mini-btn,
+.side-user button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    border-radius: var(--radius-control);
+}
+.btn-primary { background: var(--primary); border-color: var(--primary); box-shadow: none; }
+.btn-primary:hover { background: var(--primary-dark); border-color: var(--primary-dark); }
+.btn { background: #fff; border: 1px solid var(--border); color: var(--text-secondary); }
+.btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+
+/* 登录页 */
+.auth-page {
+    min-height: 100dvh;
+    display: grid;
+    grid-template-columns: 1.1fr 1fr;
+    background: var(--bg);
+}
+.auth-brand {
+    background: #1e3a8a;
+    color: #fff;
+    padding: 56px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 18px;
+}
+.auth-brand-mark {
+    width: 48px;
+    height: 48px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.14);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.auth-brand-mark .ui-icon { width: 24px; height: 24px; }
+.auth-brand h1 { font-size: 30px; line-height: 1.25; margin: 0; color: #fff; }
+.auth-brand-desc { color: rgba(255, 255, 255, 0.82); max-width: 42ch; line-height: 1.7; }
+.auth-brand-points { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 12px; }
+.auth-brand-points li { display: flex; align-items: center; gap: 10px; color: rgba(255, 255, 255, 0.92); }
+.auth-form-panel { display: flex; align-items: center; justify-content: center; padding: 32px; }
+.auth-form { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 14px; }
+.auth-form h2 { font-size: 24px; margin: 0; }
+.auth-form .auth-sub { margin: -6px 0 6px; color: var(--muted); }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > span { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+.field input {
+    min-height: 42px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    font-size: 15px;
+    background: #fff;
+}
+.field input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16); outline: none; }
+.auth-submit { min-height: 44px; justify-content: center; font-size: 15px; }
+.auth-switch,
+.auth-rule { background: none; border: none; color: var(--muted); font-size: 13px; text-align: center; }
+.auth-switch:hover { color: var(--primary); }
+
+/* 应用外壳 */
+.app-shell { background: var(--bg); }
+.app-sidebar { width: 240px; background: #fff; border-right: 1px solid var(--border); }
+.side-nav { gap: 2px; }
+.nav-group-label {
+    margin: 14px 6px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #98a2b3;
+}
+.side-nav button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 0 10px;
+    border-radius: var(--radius-control);
+    color: var(--text-secondary);
+}
+.side-nav button:hover { background: var(--surface-muted); color: var(--text); }
+.side-nav button.active { background: var(--primary-soft); color: var(--primary); box-shadow: none; }
+.side-nav button.active .ui-icon svg { stroke: var(--primary); }
+.side-user button { justify-content: flex-start; background: #fff; border: 1px solid var(--border); }
+.app-content { background: var(--bg); }
+.app-header { background: #fff; border-bottom: 1px solid var(--border); padding: 16px 24px; }
+.app-header .header-title h1 { font-size: 20px; }
+.app-header .slogan { color: var(--muted); font-size: 13px; }
+.app-main { max-width: 1200px; margin: 0 auto; padding: 24px; width: 100%; }
+
+/* 首页 */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.kpi .card-title { margin-bottom: 6px; }
+.kpi .card-value { font-size: 28px; }
+.dashboard-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; margin: 16px 0; }
+.panel {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 16px;
+    box-shadow: var(--shadow-card);
+}
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.panel-head h3 { margin: 0; font-size: 16px; }
+.card { box-shadow: var(--shadow-card); border: 1px solid var(--border); border-radius: var(--radius-card); }
+
+/* 上传与知识树 */
+.upload-btn { min-height: 40px; background: #fff; }
+.upload-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.dir-toggle { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+.dir-arrow .ui-icon svg { transition: transform 0.18s ease; }
+.dir-arrow.expanded .ui-icon svg { transform: rotate(90deg); }
+.dir-dot { display: inline-flex; align-items: center; color: var(--primary); }
+
+/* 移动端 */
+.mobile-bottom-nav { display: none; }
+@media (max-width: 900px) {
+    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dashboard-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 768px) {
+    .auth-page { grid-template-columns: 1fr; }
+    .auth-brand { display: none; }
+    .auth-form-panel { padding: 48px 20px 24px; align-items: flex-start; }
+    .app-main { padding: 16px 14px 84px; }
+    .mobile-bottom-nav {
+        display: flex;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 60;
+        background: #fff;
+        border-top: 1px solid var(--border);
+        padding: 6px 4px calc(6px + env(safe-area-inset-bottom));
+    }
+    .mobile-bottom-nav button {
+        flex: 1;
+        min-height: 48px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        background: none;
+        border: none;
+        color: var(--muted);
+        font-size: 11px;
+    }
+    .mobile-bottom-nav button.active { color: var(--primary); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .dir-arrow .ui-icon svg { transition: none; }
+}
+
+/* ============================================================
+   反馈修正：输入框和侧栏边界要清晰
+   UI/UX Pro Max 非文本对比度：控件边界目标 3:1
+   #e4e7ec 对白底仅 1.24:1，不达标；#667085 为 4.97:1
+   ============================================================ */
+.field input {
+    border: 2px solid #667085;
+}
+.field input:hover {
+    border-color: #475467;
+}
+.field input:focus {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+.form-row input,
+.form-row select,
+.form-row textarea,
+.filters input,
+.filters select,
+.batch-toolbar select,
+.dir-search input,
+.dir-add-line input {
+    border: 1.5px solid #667085;
+}
+.form-row input:focus,
+.form-row select:focus,
+.form-row textarea:focus,
+.filters input:focus,
+.filters select:focus,
+.batch-toolbar select:focus,
+.dir-search input:focus,
+.dir-add-line input:focus {
+    border-color: var(--primary);
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+.app-sidebar {
+    border-right: 1px solid #667085;
+    box-shadow: 4px 0 16px rgba(16, 24, 40, 0.08);
+}
+.nav-group-label {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e4e7ec;
+}
+.nav-group-label:first-child {
+    margin-top: 8px;
+    padding-top: 0;
+    border-top: none;
+}
+.side-user {
+    border-top: 1px solid #d0d5dd;
+}
+
+/* ============================================================
+   反馈修正：登录表单需要外框，logo 重新设计
+   ============================================================ */
+.auth-card {
+    width: 100%;
+    max-width: 420px;
+    background: #ffffff;
+    border: 1px solid #d0d5dd;
+    border-radius: 8px;
+    padding: 28px;
+    box-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
+}
+.auth-card .auth-form {
+    max-width: none;
+}
+.auth-brand-mark {
+    width: auto;
+    height: auto;
+    background: transparent;
+}
+.side-logo {
+    width: auto;
+    height: auto;
+    background: none;
+    box-shadow: none;
+    border-radius: 0;
+    font-size: 0;
+}
+.side-logo svg {
+    display: block;
+}
+@media (max-width: 768px) {
+    .auth-card {
+        padding: 22px 18px;
+    }
+}

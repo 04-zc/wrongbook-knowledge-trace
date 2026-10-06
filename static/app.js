@@ -97,15 +97,15 @@ const appOptions = {
             authError: '',
             authLoading: false,
             navs: [
-                { key: 'dashboard', label: '首页' },
-                { key: 'input', label: '错题录入' },
-                { key: 'library', label: '错题库' },
-                { key: 'review', label: '复习模式' },
-                { key: 'weak', label: '薄弱分析' },
-                { key: 'graph', label: '知识图谱' },
-                { key: 'report', label: '统计报表' },
-                { key: 'trash', label: '回收站' },
-                { key: 'settings', label: '学科设置' }
+                { key: 'dashboard', label: '首页', icon: 'layout-dashboard', group: '学习', hint: '今日概览与最近动态' },
+                { key: 'input', label: '错题录入', icon: 'square-pen', group: '学习', hint: '手动录入、拍照识别、文档导入' },
+                { key: 'library', label: '错题库', icon: 'book-open', group: '学习', hint: '筛选、编辑与批量管理错题' },
+                { key: 'review', label: '复习模式', icon: 'calendar-check', group: '学习', hint: '今日推荐与复习计划' },
+                { key: 'weak', label: '薄弱分析', icon: 'chart-no-axes-column', group: '分析', hint: '薄弱指数与错误趋势' },
+                { key: 'graph', label: '知识图谱', icon: 'network', group: '分析', hint: '分层导图、树图与旭日图' },
+                { key: 'report', label: '统计报表', icon: 'file-chart-column', group: '分析', hint: '汇总统计与 Word / PDF 导出' },
+                { key: 'trash', label: '回收站', icon: 'trash-2', group: '管理', hint: '恢复或彻底删除错题' },
+                { key: 'settings', label: '学科设置', icon: 'folder-cog', group: '管理', hint: '学科与知识点目录' }
             ],
             subjects: [],
             knowledgePoints: [],
@@ -221,6 +221,31 @@ const appOptions = {
         };
     },
     computed: {
+        navGroups() {
+            const groups = [];
+            for (const nav of this.navs) {
+                let group = groups.find(item => item.name === nav.group);
+                if (!group) {
+                    group = { name: nav.group, items: [] };
+                    groups.push(group);
+                }
+                group.items.push(nav);
+            }
+            return groups;
+        },
+        mobileNavs() {
+            const wanted = ['dashboard', 'input', 'library', 'review'];
+            return wanted.map(key => this.navs.find(nav => nav.key === key)).filter(Boolean);
+        },
+        currentNavItem() {
+            return this.navs.find(nav => nav.key === this.currentNav) || this.navs[0];
+        },
+        currentNavLabel() {
+            return this.currentNavItem ? this.currentNavItem.label : '错题本助手';
+        },
+        currentNavHint() {
+            return this.currentNavItem ? (this.currentNavItem.hint || '') : '';
+        },
         unmasteredCount() {
             return this.dashboardStats.unmastered;
         },
@@ -870,10 +895,10 @@ const appOptions = {
                         type: 'pie',
                         radius: ['42%', '70%'],
                         data: [
-                            { name: '未掌握', value: sc[0] || 0, itemStyle: { color: '#ef4444' } },
-                            { name: '已掌握', value: sc[1] || 0, itemStyle: { color: '#10b981' } },
+                            { name: '未掌握', value: sc[0] || 0, itemStyle: { color: '#dc2626' } },
+                            { name: '已掌握', value: sc[1] || 0, itemStyle: { color: '#059669' } },
                             { name: '已复习', value: sc[2] || 0, itemStyle: { color: '#f59e0b' } },
-                            { name: '已归档', value: sc[3] || 0, itemStyle: { color: '#94a3b8' } }
+                            { name: '已归档', value: sc[3] || 0, itemStyle: { color: '#6b7280' } }
                         ]
                     }]
                 });
@@ -1302,7 +1327,7 @@ const appOptions = {
         heatColor(v) {
             if (v >= 7) return '#dc2626';
             if (v >= 4) return '#f59e0b';
-            return '#10b981';
+            return '#059669';
         },
         async openCamera() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -2288,7 +2313,57 @@ const appOptions = {
         }
     }
 };
+function toPascalIconName(name) {
+    return String(name || '').replace(/(^|-)([a-z0-9])/g, (match, dash, char) => char.toUpperCase());
+}
+
+const AppLogo = {
+    props: {
+        size: { type: Number, default: 36 }
+    },
+    template: `
+        <svg :width="size" :height="size" viewBox="0 0 48 48" fill="none" role="img" aria-label="错题本知识溯源整理助手">
+            <rect x="2" y="2" width="44" height="44" rx="11" fill="#1e3a8a"/>
+            <path d="M16 11h11l7 7v19a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2z" fill="#ffffff"/>
+            <path d="M27 11l7 7h-7z" fill="#bfdbfe"/>
+            <path d="M18 24h11M18 29h6" stroke="#93c5fd" stroke-width="2" stroke-linecap="round"/>
+            <path d="M30 30l3 3 5-6" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>`
+};
+
+const UiIcon = {
+    props: {
+        name: { type: String, required: true },
+        size: { type: Number, default: 18 }
+    },
+    template: '<span class="ui-icon" aria-hidden="true"></span>',
+    mounted() {
+        this.renderIcon();
+    },
+    updated() {
+        this.renderIcon();
+    },
+    methods: {
+        renderIcon() {
+            const host = this.$el;
+            const lucide = window.lucide;
+            if (!host || !lucide || !lucide.icons) return;
+            const iconNode = lucide.icons[toPascalIconName(this.name)];
+            if (!iconNode) return;
+            const svg = lucide.createElement(iconNode);
+            svg.setAttribute('width', String(this.size));
+            svg.setAttribute('height', String(this.size));
+            svg.setAttribute('stroke-width', '1.75');
+            svg.setAttribute('aria-hidden', 'true');
+            host.innerHTML = '';
+            host.appendChild(svg);
+        }
+    }
+};
+
 const app = createApp(appOptions);
+app.component('app-logo', AppLogo);
+app.component('ui-icon', UiIcon);
 window.appInstance = app;
 app.mount('#app');
 console.log('错题本前端已加载');

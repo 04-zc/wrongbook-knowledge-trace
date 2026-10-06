@@ -1,4 +1,4 @@
-const CACHE_NAME = 'wrongbook-shell-v5';
+const CACHE_NAME = 'wrongbook-shell-v6';
 const META_CACHE = 'wrongbook-sw-meta';
 const META_USER_URL = '/__wrongbook_user_id';
 const USER_CACHE_PREFIX = 'wrongbook-user-';
@@ -9,6 +9,7 @@ const APP_SHELL = [
     '/static/vue.global.js',
     '/static/axios.min.js',
     '/static/vendor/echarts.min.js',
+    '/static/vendor/lucide.min.js',
     '/static/vendor/katex/katex.min.css',
     '/static/vendor/katex/katex.min.js',
     '/static/manifest.webmanifest',
@@ -52,7 +53,7 @@ self.addEventListener('activate', event => {
                         // 外壳缓存只保留当前版本
                         if (key.startsWith('wrongbook-shell-')) return key !== CACHE_NAME;
                         // 每用户缓存只保留当前版本，避免残留过期的接口数据
-                        if (key.startsWith(USER_CACHE_PREFIX)) return !key.endsWith('-v5');
+                        if (key.startsWith(USER_CACHE_PREFIX)) return !key.endsWith('-v6');
                         return false;
                     })
                     .map(key => caches.delete(key))
@@ -131,7 +132,7 @@ async function clearUserCaches() {
 async function getUserCache() {
     const userId = await getCurrentUserId();
     if (!userId) return null;
-    return caches.open(USER_CACHE_PREFIX + userId + '-v5');
+    return caches.open(USER_CACHE_PREFIX + userId + '-v6');
 }
 
 async function networkFirstApi(request, url) {

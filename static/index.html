@@ -12,34 +12,57 @@
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <link rel="icon" href="/static/icons/icon-192.png">
     <title>错题本知识溯源整理助手</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260919a">
+    <link rel="stylesheet" href="/static/style.css?v=20261007ui">
     <script src="/static/vue.global.js"></script>
     <script src="/static/axios.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
     <script src="/static/vendor/katex/katex.min.js"></script>
     <script src="/static/vendor/echarts.min.js"></script>
+    <script src="/static/vendor/lucide.min.js"></script>
 </head>
 <body>
 <div id="app">
     <!-- 登录 / 注册 -->
     <div v-if="!authUser" class="auth-page">
-        <form class="auth-card" @submit.prevent="submitAuth">
-            <div class="auth-logo">错题本</div>
-            <h2>错题本知识溯源整理助手</h2>
-            <p class="auth-sub">{{ authMode === 'login' ? '登录你的账号' : '注册新账号' }}</p>
-            <input v-model.trim="authUsername" type="text" placeholder="账号（英文或数字）" autocomplete="username">
-            <input v-model="authPassword" type="password" placeholder="密码（英文或数字）" autocomplete="current-password">
-            <input v-if="authMode === 'register'" v-model="authConfirm" type="password" placeholder="再次输入密码" autocomplete="new-password">
-            <p v-if="authError" class="auth-error">{{ authError }}</p>
-            <button class="btn-primary auth-submit" type="submit" :disabled="authLoading">
-                {{ authLoading ? '处理中...' : (authMode === 'login' ? '登 录' : '注册并登录') }}
-            </button>
-            <button type="button" class="auth-switch" @click="toggleAuthMode">
-                {{ authMode === 'login' ? '还没有账号？去注册' : '已有账号？返回登录' }}
-            </button>
-            <button type="button" class="auth-switch" v-if="authMode === 'login'" @click="openResetModal">忘记密码？重置密码</button>
-            <p class="auth-rule">账号和密码只能使用英文字母和数字</p>
-        </form>
+        <section class="auth-brand">
+            <div class="auth-brand-mark"><app-logo :size="56"></app-logo></div>
+            <h1>错题本知识溯源整理助手</h1>
+            <p class="auth-brand-desc">记录错题、定位薄弱知识点、规划复习，形成从整理到掌握的完整闭环。</p>
+            <ul class="auth-brand-points">
+                <li><ui-icon name="scan-text"></ui-icon><span>拍照与 PDF / DOCX 自动识别</span></li>
+                <li><ui-icon name="git-branch"></ui-icon><span>知识溯源定位错误根因</span></li>
+                <li><ui-icon name="chart-line"></ui-icon><span>薄弱分析与复习计划</span></li>
+            </ul>
+        </section>
+        <section class="auth-form-panel">
+            <div class="auth-card">
+                <form class="auth-form" @submit.prevent="submitAuth">
+                    <h2>{{ authMode === 'login' ? '登录' : '注册' }}</h2>
+                    <p class="auth-sub">{{ authMode === 'login' ? '登录账号继续整理错题' : '创建账号开始整理错题' }}</p>
+                    <label class="field">
+                        <span>账号</span>
+                        <input v-model.trim="authUsername" type="text" placeholder="英文或数字" autocomplete="username">
+                    </label>
+                    <label class="field">
+                        <span>密码</span>
+                        <input v-model="authPassword" type="password" placeholder="英文或数字" autocomplete="current-password">
+                    </label>
+                    <label class="field" v-if="authMode === 'register'">
+                        <span>确认密码</span>
+                        <input v-model="authConfirm" type="password" placeholder="再次输入密码" autocomplete="new-password">
+                    </label>
+                    <p v-if="authError" class="auth-error">{{ authError }}</p>
+                    <button class="btn-primary auth-submit" type="submit" :disabled="authLoading">
+                        {{ authLoading ? '处理中…' : (authMode === 'login' ? '登录' : '注册并登录') }}
+                    </button>
+                    <button type="button" class="auth-switch" @click="toggleAuthMode">
+                        {{ authMode === 'login' ? '还没有账号？去注册' : '已有账号？返回登录' }}
+                    </button>
+                    <button type="button" class="auth-switch" v-if="authMode === 'login'" @click="openResetModal">忘记密码？重置密码</button>
+                    <p class="auth-rule">账号和密码只能使用英文字母和数字</p>
+                </form>
+            </div>
+        </section>
     </div>
 
     <template v-else>
@@ -47,72 +70,108 @@
     <div v-if="error" class="error-toast">{{ error }}</div>
     <div class="app-shell">
         <aside class="app-sidebar" :class="{open: mobileMenuOpen}">
-            <button type="button" class="mobile-close" @click="mobileMenuOpen=false">×</button>
+            <button type="button" class="mobile-close" @click="mobileMenuOpen=false" aria-label="关闭菜单"><ui-icon name="x"></ui-icon></button>
             <div class="side-brand">
-                <div class="side-logo">错</div>
+                <div class="side-logo"><app-logo :size="30"></app-logo></div>
                 <div>
                     <div class="side-title">错题本</div>
                     <div class="side-subtitle">知识溯源助手</div>
                 </div>
             </div>
             <nav class="side-nav">
-                <button v-for="nav in navs" :key="nav.key" :class="{active: isNavActive(nav)}" @click="goTo(nav.key)">
-                    <span>{{ nav.label }}</span>
-                    <span v-if="nav.key==='review' && reviewPlanCounts.total" class="nav-badge">{{ reviewPlanCounts.total }}</span>
-                </button>
+                <template v-for="group in navGroups" :key="group.name">
+                    <div class="nav-group-label">{{ group.name }}</div>
+                    <button v-for="nav in group.items" :key="nav.key" :class="{active: isNavActive(nav)}" @click="goTo(nav.key)">
+                        <ui-icon :name="nav.icon"></ui-icon>
+                        <span>{{ nav.label }}</span>
+                        <span v-if="nav.key==='review' && reviewPlanCounts.total" class="nav-badge">{{ reviewPlanCounts.total }}</span>
+                    </button>
+                </template>
             </nav>
             <div class="side-user">
                 <div class="side-username">{{ authUser.username }}</div>
-                <button type="button" @click="openLlmConfig">模型与 OCR 配置</button>
-                <button type="button" @click="openAccountModal">账号设置</button>
-                <button type="button" @click="switchUser">切换用户</button>
+                <button type="button" @click="openLlmConfig"><ui-icon name="settings-2"></ui-icon>模型与 OCR 配置</button>
+                <button type="button" @click="openAccountModal"><ui-icon name="user"></ui-icon>账号设置</button>
+                <button type="button" @click="switchUser"><ui-icon name="log-out"></ui-icon>切换用户</button>
             </div>
         </aside>
         <div class="mobile-overlay" v-if="mobileMenuOpen" @click="mobileMenuOpen=false"></div>
         <div class="app-content">
             <div class="mobile-topbar">
-                <button type="button" class="mobile-menu-btn" @click="mobileMenuOpen=true">☰</button>
-                <div class="mobile-page-title">错题本助手</div>
-                <button type="button" class="mobile-user-btn" @click="openAccountModal">{{ authUser.username }}</button>
+                <button type="button" class="mobile-menu-btn" @click="mobileMenuOpen=true" aria-label="打开菜单"><ui-icon name="menu"></ui-icon></button>
+                <div class="mobile-page-title">{{ currentNavLabel }}</div>
+                <button type="button" class="mobile-user-btn" @click="openAccountModal" aria-label="账号设置"><ui-icon name="user"></ui-icon></button>
             </div>
             <header class="app-header">
                 <div class="header-title">
-                    <h1>错题本知识溯源整理助手</h1>
-                    <p class="slogan">不只是记错题，更是找到错题的根。</p>
+                    <h1>{{ currentNavLabel }}</h1>
+                    <p class="slogan">{{ currentNavHint }}</p>
                 </div>
             </header>
 
             <main class="app-main">
         <!-- 仪表盘 -->
         <section v-if="currentNav==='dashboard'" class="section">
-            <h2>今日概览</h2>
-            <div class="cards">
-                <div class="card">
+            <div class="kpi-grid">
+                <div class="card kpi">
                     <div class="card-title">总错题数</div>
                     <div class="card-value">{{ dashboardStats.total }}</div>
                 </div>
-                <div class="card">
+                <div class="card kpi">
                     <div class="card-title">未掌握</div>
                     <div class="card-value">{{ unmasteredCount }}</div>
                 </div>
-                <div class="card">
-                    <div class="card-title">薄弱知识点 TOP3</div>
+                <div class="card kpi">
+                    <div class="card-title">今日待复习</div>
+                    <div class="card-value">{{ reviewPlanCounts.today }}</div>
+                </div>
+                <div class="card kpi">
+                    <div class="card-title">逾期计划</div>
+                    <div class="card-value">{{ reviewPlanCounts.overdue }}</div>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <section class="panel">
+                    <div class="panel-head">
+                        <h3>今日复习</h3>
+                        <button type="button" class="btn-primary" @click="goTo('review')">开始复习</button>
+                    </div>
+                    <div v-if="reviewPlans.length" class="question-list">
+                        <div class="q-item" v-for="p in reviewPlans.slice(0,5)" :key="p.id" @click="goTo('review')">
+                            <div class="q-title">{{ p.question_text || '(无标题)' }}</div>
+                            <div class="q-meta"><span class="tag">{{ p.plan_date }}</span></div>
+                        </div>
+                    </div>
+                    <p v-else class="empty-tip">今天没有待复习计划。</p>
+                </section>
+                <section class="panel">
+                    <div class="panel-head">
+                        <h3>薄弱知识点 TOP3</h3>
+                        <button type="button" class="btn" @click="goTo('weak')">查看分析</button>
+                    </div>
                     <ul class="card-list">
                         <li v-for="w in weakPoints.slice(0,3)" :key="w.id">{{ w.name }} <span class="badge">{{ w.weak_index }}</span></li>
                         <li v-if="weakPoints.length===0">暂无数据</li>
                     </ul>
-                </div>
+                </section>
             </div>
-            <h3 style="margin-top:20px">最近错题</h3>
-            <div class="question-list">
-                <div class="q-item" v-for="q in recentQuestions" :key="q.id" @click="openQuestion(q)">
-                    <div class="q-title">{{ q.title_text || '(无标题)' }}</div>
-                    <div class="q-meta">
-                        <span class="tag">{{ q.subject_name || '未分类' }}</span>
-                        <span class="tag" :class="'status-'+q.status">{{ statusText(q.status) }}</span>
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h3>最近错题</h3>
+                    <button type="button" class="btn" @click="goTo('library')">全部错题</button>
+                </div>
+                <div class="question-list">
+                    <div class="q-item" v-for="q in recentQuestions" :key="q.id" @click="openQuestion(q)">
+                        <div class="q-title">{{ q.title_text || '(无标题)' }}</div>
+                        <div class="q-meta">
+                            <span class="tag">{{ q.subject_name || '未分类' }}</span>
+                            <span class="tag" :class="'status-'+q.status">{{ statusText(q.status) }}</span>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </section>
         </section>
 
         <!-- 错题录入 -->
@@ -142,8 +201,8 @@
                 <div class="form-row">
                     <label>题干图片</label>
                     <div class="upload-actions">
-                        <button type="button" class="upload-btn camera-btn" @click="openCamera">📷 拍摄题目</button>
-                        <button type="button" class="upload-btn" @click="$refs.fileInput.click()">🖼 选择图片</button>
+                        <button type="button" class="upload-btn camera-btn" @click="openCamera"><ui-icon name="camera"></ui-icon><span>拍摄题目</span></button>
+                        <button type="button" class="upload-btn" @click="$refs.fileInput.click()"><ui-icon name="image"></ui-icon><span>选择图片</span></button>
                         <input ref="fileInput" type="file" accept="image/*" @change="handleImageUpload" hidden>
                         <input ref="captureInput" type="file" accept="image/*" capture="environment" @change="handleImageUpload" hidden>
                     </div>
@@ -600,25 +659,25 @@
                 <div v-if="kpRows.length" class="dir-tree">
                     <div v-for="row in kpRows" :key="row.key" class="dir-row" :class="{'dir-subject': row.isSubject, active: !row.isSubject && row.node.id === kpForm.parent_id, flash: row.flash}">
                         <button type="button" class="dir-toggle" @click="toggleDirRow(row)">
-                            <span class="dir-arrow">{{ row.expanded ? '▾' : '▸' }}</span>
+                            <span class="dir-arrow" :class="{expanded: row.expanded}"><ui-icon name="chevron-right"></ui-icon></span>
                         </button>
                         <button type="button" class="dir-label" @click="row.isSubject ? toggleDirRow(row) : openKpDetail(row.node)" :style="{paddingLeft: (row.isSubject ? 0 : row.depth * 22) + 'px'}">
-                            <span class="dir-dot" v-if="row.isSubject">📁</span>
+                            <span class="dir-dot" v-if="row.isSubject"><ui-icon name="folder"></ui-icon></span>
                             <span class="dir-dot" v-else>●</span>
                             <span class="dir-name" :class="{highlight: row.highlight}">{{ row.name }}</span>
                             <span class="badge" v-if="row.count">{{ row.count }}</span>
                         </button>
                         <span class="dir-actions">
-                            <button v-if="row.isSubject" type="button" class="mini-btn" @click.stop="startRootKp(row.node)">＋ 一级</button>
+                            <button v-if="row.isSubject" type="button" class="mini-btn" @click.stop="startRootKp(row.node)"><ui-icon name="plus"></ui-icon>一级</button>
                             <template v-else>
-                                <button type="button" class="mini-btn" @click.stop="startDirChild(row.node)">＋ 子级</button>
+                                <button type="button" class="mini-btn" @click.stop="startDirChild(row.node)"><ui-icon name="plus"></ui-icon>子级</button>
                                 <button type="button" class="mini-btn mini-danger" @click.stop="deleteDirKp(row.node)">删除</button>
                             </template>
                         </span>
                     </div>
                 </div>
                 <div v-if="kpSearch && !kpRows.length" class="empty-tip">没有找到匹配的知识点，换个关键词试试。</div>
-                <div v-if="!kpSearch && !kpRows.length" class="empty-tip">该学科还没有知识点，展开学科后点击「＋ 一级」开始搭建。</div>
+                <div v-if="!kpSearch && !kpRows.length" class="empty-tip">该学科还没有知识点，展开学科后点击「一级」开始搭建。</div>
                 <div class="dir-add" v-if="kpForm.subject_id">
                     <span class="dir-add-label" v-if="settingsKpHint">添加到「{{ settingsKpHint }}」下</span>
                     <span class="dir-add-label" v-else>在「{{ selectedDirSubjectName }}」下添加一级知识点</span>
@@ -632,6 +691,16 @@
         </section>
     </main>
         </div>
+        <nav class="mobile-bottom-nav" aria-label="主导航">
+            <button v-for="item in mobileNavs" :key="item.key" :class="{active: isNavActive(item)}" @click="goTo(item.key)">
+                <ui-icon :name="item.icon"></ui-icon>
+                <span>{{ item.label }}</span>
+            </button>
+            <button type="button" :class="{active: mobileMenuOpen}" @click="mobileMenuOpen=true">
+                <ui-icon name="ellipsis"></ui-icon>
+                <span>更多</span>
+            </button>
+        </nav>
     </div>
 
     <!-- 账号设置 -->
@@ -1250,6 +1319,6 @@
     </div>
     </template>
 </div>
-    <script src="/static/app.js?v=20260919a"></script>
+    <script src="/static/app.js?v=20261007ui"></script>
 </body>
 </html>
