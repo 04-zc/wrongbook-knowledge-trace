@@ -917,8 +917,13 @@
         <div class="modal-body edit-modal">
             <h3>{{ aiModal.title }}</h3>
             <div v-if="aiLoading" class="ocr-status">大模型生成中，请稍候...</div>
-            <textarea v-model="aiModal.content" rows="14" class="ai-content" placeholder="生成内容会显示在这里"></textarea>
-            <div v-if="aiModal.content" class="latex-preview" v-html="latexHtml(aiModal.content)"></div>
+            <!-- 生成结果只渲染一次：编辑时显示文本框，看完可切到公式预览，两者不叠加 -->
+            <div v-if="aiModal.content" class="detail-tabs ai-view-tabs">
+                <button type="button" :class="{active: !aiPreview}" @click="aiPreview=false">编辑内容</button>
+                <button type="button" :class="{active: aiPreview}" @click="aiPreview=true">公式预览</button>
+            </div>
+            <textarea v-if="!aiPreview" v-model="aiModal.content" rows="14" class="ai-content" placeholder="生成内容会显示在这里"></textarea>
+            <div v-else class="latex-preview" v-html="latexHtml(aiModal.content)"></div>
             <div class="modal-actions">
                 <button class="btn-primary" @click="saveAiMaterial">保存到知识库</button>
                 <button class="btn" @click="regenerateAiMaterial">重新生成</button>
@@ -967,7 +972,7 @@
                         <div class="typical-question" v-html="latexHtml(q.question)"></div>
                         <div class="typical-actions">
                             <button type="button" class="mini-btn" @click="toggleTypicalAnswer('ai-' + idx)">{{ typicalModal.openAnswer === 'ai-' + idx ? '隐藏答案' : '查看答案' }}</button>
-                            <button type="button" class="mini-btn" @click="saveTypicalOne(q)">保存本题</button>
+                            <button type="button" class="mini-btn" @click="saveTypicalOne(q)">存入错题库</button>
                         </div>
                         <div v-if="typicalModal.openAnswer === 'ai-' + idx" class="typical-answer">
                             <p><strong>答案：</strong><span v-html="latexHtml(q.answer)"></span></p>
@@ -977,7 +982,7 @@
                     <p v-if="!typicalModal.questions.length && !typicalAiLoading" class="empty-tip">还没有生成内容。</p>
                 </div>
                 <div class="modal-actions">
-                    <button class="btn-primary" v-if="typicalModal.questions.length" @click="saveTypicalAi">保存选中题目</button>
+                    <button class="btn-primary" v-if="typicalModal.questions.length" @click="saveTypicalAi">选中题目存入错题库</button>
                     <button class="btn" @click="continueTypicalAi" :disabled="typicalAiLoading">继续生成更多题目</button>
                     <button class="btn" @click="generateTypicalAi" :disabled="typicalAiLoading">重新生成</button>
                     <button class="btn" @click="typicalModal.show=false">关闭</button>

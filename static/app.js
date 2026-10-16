@@ -226,6 +226,7 @@ const appOptions = {
             importPreview: [],
             aiLoading: false,
             aiModal: { show: false, kp: null, mode: 'concept', content: '', title: '' },
+            aiPreview: false,
             typicalModal: { show: false, kp: null, mode: 'typical', ownExamples: [], questions: [], aiContent: '', view: 'own', openAnswer: '' },
             typicalLoading: false,
             typicalAiLoading: false,
@@ -1565,6 +1566,7 @@ const appOptions = {
                 content: '',
                 title: `${kp.name} · ${mode === 'concept' ? '概念回顾' : '变式练习'}`
             };
+            this.aiPreview = false;
             await this.generateAiMaterial();
         },
         async openTypicalExamples(kp, mode = 'typical') {
@@ -1798,33 +1800,46 @@ const appOptions = {
             out += escapeHtml(raw.slice(last)).replace(/\n/g, '<br>');
             return out;
         },
+        // 保存到错题库（而不是知识库材料），这样在「错题库」里能直接看到
         async saveTypicalAi() {
             const selected = this.typicalModal.questions.filter(q => q._selected);
             if (!selected.length) {
                 alert('请先勾选要保存的题目');
                 return;
             }
-            if (!confirm(`确认保存选中的 ${selected.length} 道题？`)) return;
-            const content = selected.map((q, i) =>
-                `第 ${i + 1} 题\n${q.question}\n\n答案：${q.answer}\n\n解析：${q.analysis}`
-            ).join('\n\n');
-            await axios.post('/api/ai/save', {
-                kp_id: this.typicalModal.kp.id,
-                mode: this.typicalModal.mode,
-                content
-            });
-            alert('已保存');
+            if (!confirm(`确认把选中的 ${selected.length} 道题保存到错题库？`)) return;
+            await this.postTypicalQuestions(selected);
             selected.forEach(q => { q._selected = false; });
+            await this.afterTypicalSaved(selected.length);
         },
         async saveTypicalOne(q) {
-            if (!confirm('确认保存这道题？')) return;
-            await axios.post('/api/ai/save', {
-                kp_id: this.typicalModal.kp.id,
-                mode: this.typicalModal.mode,
-                content: `题目：${q.question}\n\n答案：${q.answer}\n\n解析：${q.analysis}`
-            });
+            if (!confirm('确认把这道题保存到错题库？')) return;
+            await this.postTypicalQuestions([q]);
             q._selected = false;
-            alert('已保存本题');
+            await this.afterTypicalSaved(1);
+        },
+        async postTypicalQuestions(list) {
+            try {
+                const res = await axios.post('/api/ai/save_questions', {
+                    kp_id: this.typicalModal.kp.id,
+                    questions: list.map(q => ({
+                        question: q.question,
+                        answer: q.answer,
+                        analysis: q.analysis
+                    }))
+                });
+                return res.data.saved || 0;
+            } catch (err) {
+                alert((err.response && err.response.data && err.response.data.error) || '保存失败，请重试');
+                throw err;
+            }
+        },
+        async afterTypicalSaved(count) {
+            // 错题库、首页统计和薄弱分析都受影响，一起刷新
+            await this.loadQuestions();
+            await this.loadLibraryPage();
+            await this.loadWeak();
+            alert(`已保存 ${count} 道题到错题库`);
         },
         ensureApiKey() {
             if (this.settings && this.settings.llm_api_key) return true;

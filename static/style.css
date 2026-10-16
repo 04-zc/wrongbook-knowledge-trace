@@ -1993,6 +1993,13 @@
     border-bottom-color: var(--c-brand-500);
 }
 
+/* AI 结果弹窗里的「编辑内容 / 公式预览」切换 */
+.ai-view-tabs {
+    display: flex;
+    gap: var(--space-1);
+    margin-bottom: var(--space-2);
+}
+
 .detail-panel {
     flex: 1;
     min-height: 240px;

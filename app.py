@@ -1043,6 +1043,43 @@ def api_kp_typical():
         return jsonify({'error': 'kp_id required'}), 400
     return jsonify(db.typical_examples(kp_id, limit=5))
 
+@app.route('/api/ai/save_questions', methods=['POST'])
+def api_ai_save_questions():
+    """把 AI 生成的题目真正存进错题库。
+
+    原先「保存本题」走的是 /api/ai/save，只写进知识库材料表，
+    错题库里看不到，用户以为按钮没生效。这里改为按错题结构落库。
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    kp_id = body.get('kp_id')
+    questions = body.get('questions') or []
+    if not kp_id:
+        return jsonify({'error': '缺少知识点'}), 400
+    if not questions:
+        return jsonify({'error': '没有可保存的题目'}), 400
+    kp = db.get_kp(kp_id)
+    if not kp:
+        return jsonify({'error': '知识点不存在'}), 404
+    saved = 0
+    for item in questions:
+        title = (item.get('question') or '').strip()
+        if not title:
+            continue
+        db.add_question({
+            'subject_id': kp['subject_id'],
+            'title_text': title,
+            'correct_answer': (item.get('answer') or '').strip(),
+            'analysis': (item.get('analysis') or '').strip(),
+            # 标记来源，方便在错题库里区分 AI 生成的例题
+            'source': 'ai',
+            'status': 0,
+            'knowledge_points': [{'id': kp_id, 'is_auto': 1, 'confidence': 1.0}]
+        })
+        saved += 1
+    if not saved:
+        return jsonify({'error': '题目内容为空，未保存'}), 400
+    return jsonify({'ok': True, 'saved': saved})
+
 @app.route('/api/knowledge_graph', methods=['GET'])
 def api_knowledge_graph():
     subject_id = request.args.get('subject_id', type=int)
