@@ -232,7 +232,7 @@ const appOptions = {
             typicalAiLoading: false,
             traceModal: { show: false, loading: false, saving: false, data: null },
             mindMapModal: { show: false, map: null, question: null, newLabel: '', newType: 'direct' },
-            kpDetail: { show: false, kp: null, path: '', materials: [], newType: 'custom', newContent: '', aiDraftContent: '', aiDraftLoading: false },
+            kpDetail: { show: false, kp: null, path: '', materials: [], newType: 'note', newContent: '', aiDraftContent: '', aiDraftLoading: false },
             cameraActive: false,
             cameraError: '',
             cameraStream: null
@@ -1099,7 +1099,7 @@ const appOptions = {
                 materials: [],
                 aiContent: '',
                 aiLoading: false,
-                newType: 'custom',
+                newType: 'note',
                 newContent: '',
                 resources: [],
                 resourceForm: { type: 'textbook', title: '', url: '', page: '', content: '', attachment: '' },
@@ -1157,9 +1157,9 @@ const appOptions = {
         async generateMaterialDraft(containerKey) {
             if (!this.ensureApiKey()) return;
             const c = this[containerKey];
-            const type = c.newType || 'custom';
-            // 自定义内容没有固定的生成模板，退化成知识点精要草稿
-            const mode = type === 'custom' ? 'summary' : type;
+            const type = c.newType || 'note';
+            // 笔记没有专用生成模板，退化成知识点精要草稿
+            const mode = (type === 'note' || type === 'custom') ? 'summary' : type;
             c.aiDraftLoading = true;
             c.aiDraftContent = '';
             try {
@@ -1841,6 +1841,19 @@ const appOptions = {
             await this.loadWeak();
             alert(`已保存 ${count} 道题到错题库`);
         },
+        // 知识库材料的类型显示名。历史数据里可能还有 custom / typical / variant，
+        // 一并给出可读名称，避免界面上直接暴露英文枚举值。
+        materialTypeLabel(type) {
+            const map = {
+                note: '笔记',
+                custom: '笔记',
+                summary: '知识点精要',
+                concept: '概念回顾',
+                typical: '典型例题',
+                variant: '变式练习'
+            };
+            return map[type] || type || '内容';
+        },
         ensureApiKey() {
             if (this.settings && this.settings.llm_api_key) return true;
             if (confirm('尚未配置大模型 API Key。请先到右上角「大模型配置」填写 API Key 后才能使用。是否现在打开配置？')) {
@@ -2361,7 +2374,7 @@ const appOptions = {
                 kp,
                 path: names.join(' > '),
                 materials: [],
-                newType: 'custom',
+                newType: 'note',
                 newContent: '',
                 aiDraftContent: '',
                 aiDraftLoading: false

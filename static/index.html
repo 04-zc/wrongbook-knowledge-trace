@@ -1323,7 +1323,7 @@
                 <div v-if="graphDetail.materials.length" class="trace-block">
                     <label>已保存的知识库内容</label>
                     <details v-for="m in graphDetail.materials" :key="m.id" class="typical-item">
-                        <summary>{{ m.type === 'summary' ? '知识点精要' : m.type }}</summary>
+                        <summary>{{ materialTypeLabel(m.type) }}</summary>
                         <textarea v-model="m.content" rows="8" class="ai-content" style="margin-top:8px"></textarea>
                         <div class="action-row">
                             <button type="button" class="btn-primary" @click="saveMaterialEdit(m)">保存修改</button>
@@ -1335,11 +1335,9 @@
                     <label>新增知识库内容</label>
                     <div class="inline-add-row">
                         <select v-model="graphDetail.newType" class="material-type-select">
-                            <option value="custom">自定义内容</option>
+                            <option value="note">笔记</option>
                             <option value="summary">知识点精要</option>
                             <option value="concept">概念回顾</option>
-                            <option value="typical">典型例题</option>
-                            <option value="variant">变式练习</option>
                         </select>
                         <button type="button" class="btn-ai" @click="generateMaterialDraft('graphDetail')" :disabled="graphDetail.aiDraftLoading">
                             {{ graphDetail.aiDraftLoading ? '生成中...' : 'AI 推荐' }}
@@ -1426,7 +1424,7 @@
             <div class="trace-block" v-if="kpDetail.materials.length">
                 <label>已保存的 AI 内容</label>
                 <details v-for="m in kpDetail.materials" :key="m.id" class="typical-item">
-                    <summary>{{ m.type === 'concept' ? '概念回顾' : m.type === 'variant' ? '变式练习' : m.type === 'typical' ? '典型例题' : 'AI 内容' }} · {{ (m.created_at || '').slice(0, 10) }}</summary>
+                    <summary>{{ materialTypeLabel(m.type) }} · {{ (m.created_at || '').slice(0, 10) }}</summary>
                     <textarea v-model="m.content" rows="8" class="ai-content" style="margin-top:8px"></textarea>
                     <div class="action-row">
                         <button type="button" class="btn-primary" @click="saveMaterialEdit(m)">保存修改</button>
@@ -1438,11 +1436,9 @@
                 <label>新增知识库内容</label>
                 <div class="inline-add-row">
                     <select v-model="kpDetail.newType" class="material-type-select">
-                        <option value="custom">自定义内容</option>
+                        <option value="note">笔记</option>
                         <option value="summary">知识点精要</option>
                         <option value="concept">概念回顾</option>
-                        <option value="typical">典型例题</option>
-                        <option value="variant">变式练习</option>
                     </select>
                     <button type="button" class="btn-ai" @click="generateMaterialDraft('kpDetail')" :disabled="kpDetail.aiDraftLoading">
                         {{ kpDetail.aiDraftLoading ? '生成中...' : 'AI 推荐' }}
