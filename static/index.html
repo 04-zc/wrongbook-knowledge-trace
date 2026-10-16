@@ -185,29 +185,41 @@
         <!-- 错题录入 -->
         <section v-if="currentNav==='input'" class="section">
             <h2>错题录入</h2>
-            <div class="form">
+
+            <!-- 第一步：选择录入方式 -->
+            <div v-if="!inputMode" class="input-mode-picker">
+                <p class="input-mode-lead">选择一种录入方式开始</p>
+                <div class="input-mode-grid">
+                    <button type="button" class="input-mode-card" @click="chooseInputMode('manual')">
+                        <span class="input-mode-icon"><ui-icon name="pencil-line"></ui-icon></span>
+                        <span class="input-mode-name">手动输入</span>
+                        <span class="input-mode-desc">直接打字录入题干、答案与解析</span>
+                    </button>
+                    <button type="button" class="input-mode-card" @click="chooseInputMode('camera')">
+                        <span class="input-mode-icon"><ui-icon name="camera"></ui-icon></span>
+                        <span class="input-mode-name">拍照输入</span>
+                        <span class="input-mode-desc">拍摄或选择题目图片，自动 OCR 识别</span>
+                    </button>
+                    <button type="button" class="input-mode-card" @click="chooseInputMode('file')">
+                        <span class="input-mode-icon"><ui-icon name="file-up"></ui-icon></span>
+                        <span class="input-mode-name">文件上传</span>
+                        <span class="input-mode-desc">导入 PDF / Word 试卷，批量拆分题目</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 第二步：按所选方式录入 -->
+            <div v-else class="form">
                 <div class="form-row">
                     <label>学科</label>
                     <select v-model="form.subject_id">
                         <option v-for="s in subjects" :key="s.id" :value="s.id">{{ s.name }}</option>
                     </select>
                 </div>
-                <div class="form-row">
-                    <label>导入试卷</label>
-                    <div class="upload-actions">
-                        <button type="button" class="upload-btn" @click="$refs.importFileInput.click()">导入 PDF / Word 试卷</button>
-                        <input ref="importFileInput" type="file" accept=".pdf,.docx" @change="handleImportFile" hidden>
-                    </div>
-                    <div v-if="importLoading" class="ocr-status">正在解析试卷，扫描版可能需要较长时间...</div>
-                    <p v-if="importMessage" class="add-hint">{{ importMessage }}</p>
-                </div>
-                <div class="form-row">
-                    <label>题干文本</label>
-                    <textarea v-model="form.title_text" rows="4" placeholder="输入题目，支持 LaTeX：$x^2$ 或 $$公式$$"></textarea>
-                    <div v-if="form.title_text" class="latex-preview" v-html="latexHtml(form.title_text)"></div>
-                </div>
-                <div class="form-row">
-                    <label>题干图片</label>
+
+                <!-- 拍照输入 -->
+                <div v-if="inputMode==='camera'" class="form-row">
+                    <label>题目图片</label>
                     <div class="upload-actions">
                         <button type="button" class="upload-btn camera-btn" @click="openCamera"><ui-icon name="camera"></ui-icon><span>拍摄题目</span></button>
                         <button type="button" class="upload-btn" @click="$refs.fileInput.click()"><ui-icon name="image"></ui-icon><span>选择图片</span></button>
@@ -215,7 +227,26 @@
                         <input ref="captureInput" type="file" accept="image/*" capture="environment" @change="handleImageUpload" hidden>
                     </div>
                     <div v-if="form.ocrLoading" class="ocr-status">OCR 识别中，请稍候...</div>
+                    <p class="add-hint">识别结果会自动填入下方题干，可再手动修改。</p>
                     <img v-if="form.title_image" :src="form.title_image" class="preview-img">
+                </div>
+
+                <!-- 文件上传 -->
+                <div v-else-if="inputMode==='file'" class="form-row">
+                    <label>导入试卷</label>
+                    <div class="upload-actions">
+                        <button type="button" class="upload-btn" @click="$refs.importFileInput.click()"><ui-icon name="file-up"></ui-icon><span>选择 PDF / Word 试卷</span></button>
+                        <input ref="importFileInput" type="file" accept=".pdf,.docx" @change="handleImportFile" hidden>
+                    </div>
+                    <div v-if="importLoading" class="ocr-status">正在解析试卷，扫描版可能需要较长时间...</div>
+                    <p v-if="importMessage" class="add-hint">{{ importMessage }}</p>
+                    <p class="add-hint">解析完成后会弹出预览，确认无误再保存。</p>
+                </div>
+
+                <div class="form-row">
+                    <label>题干文本</label>
+                    <textarea v-model="form.title_text" rows="4" placeholder="输入题目，支持 LaTeX：$x^2$ 或 $$公式$$"></textarea>
+                    <div v-if="form.title_text" class="latex-preview" v-html="latexHtml(form.title_text)"></div>
                 </div>
                 <div class="form-row">
                     <label>正确答案</label>
@@ -249,15 +280,17 @@
                             {{ kp.name }} <small>({{ (kp.confidence*100).toFixed(0) }}%)</small>
                             <button type="button" class="btn-sm btn-danger" @click="removeKp(idx)">删除</button>
                         </span>
-                        <button type="button" class="btn-sm" @click="showKpSelector=true">+ 添加</button>
                         <button type="button" class="btn-sm btn-ai" @click="recommendKp" :disabled="recommending">
                             {{ recommending ? 'AI推荐中...' : 'AI推荐知识点' }}
                         </button>
+                        <button type="button" class="btn-sm" @click="showKpSelector=true">+ 添加</button>
                     </div>
+                    <p class="add-hint">建议先点「AI推荐知识点」自动匹配，再手动「添加」补充。</p>
                 </div>
                 <div class="form-actions">
                     <button class="btn-primary" @click="saveQuestion">保存错题</button>
                     <button class="btn" @click="resetForm">重置</button>
+                    <button class="btn" @click="exitInputMode">返回重选方式</button>
                 </div>
             </div>
         </section>
@@ -425,8 +458,7 @@
                         <button type="button" class="mini-btn" @click="openTypicalExamples(n)">典型例题</button>
                         <button type="button" class="mini-btn" @click="openTypicalExamples(n, 'variant')">变式练习</button>
                         <button type="button" class="mini-btn" @click="startChildKp(n)">+ 子级</button>
-                        <button type="button" class="mini-btn mini-danger" @click="deleteWeakKp(n)">删除</button>
-                    </div>
+                        <button type="button" class="mini-btn mini-danger" @click="deleteWeakKp(n)">删除</button>                    </div>
                 </div>
             </div>
         </section>
@@ -566,8 +598,8 @@
                         <div v-for="p in group.items" :key="p.id" class="plan-item">
                             <div class="plan-question">{{ p.question_text }}</div>
                             <span class="plan-date">{{ p.plan_date }}</span>
-                            <button type="button" class="mini-btn" @click="startPlan(p)">开始复习</button>
                             <button type="button" class="mini-btn" @click="completePlan(p, 1)">完成</button>
+                            <button type="button" class="mini-btn" @click="startPlan(p)">开始复习</button>
                             <button type="button" class="mini-btn" @click="completePlan(p, 0)">跳过</button>
                             <button type="button" class="mini-btn mini-danger" @click="deletePlan(p)">删除</button>
                         </div>
@@ -647,11 +679,18 @@
         <!-- 学科设置 -->
         <section v-if="currentNav==='settings'" class="section">
             <h2>学科设置</h2>
-            <div class="form">
-                <h3>学科管理</h3>
-                <div class="form-row inline">
-                    <input type="text" v-model="newSubject" placeholder="新学科名称">
-                    <button class="btn-primary" @click="addSubject">添加</button>
+
+            <!-- 学科管理：两个入口按钮，具体操作都在弹窗里完成 -->
+            <div class="settings-block">
+                <div class="settings-block-head">
+                    <div>
+                        <h3>学科管理</h3>
+                        <p class="block-desc">共 {{ subjects.length }} 个学科。新增需要二次确认；删除会连同该学科下全部子节点一起清除。</p>
+                    </div>
+                    <div class="settings-block-actions">
+                        <button type="button" class="btn-primary" @click="openAddSubjectModal"><ui-icon name="plus"></ui-icon><span>新增学科</span></button>
+                        <button type="button" class="btn btn-danger" @click="openDeleteSubjectModal" :disabled="!subjects.length"><ui-icon name="trash"></ui-icon><span>删除学科</span></button>
+                    </div>
                 </div>
                 <div class="subject-chips">
                     <div v-for="s in subjects" :key="s.id" class="subject-chip" :class="{active: kpForm.subject_id === s.id}">
@@ -659,46 +698,24 @@
                             {{ s.name }}
                             <span class="chip-count" v-if="subjectKpCount(s.id)">{{ subjectKpCount(s.id) }}</span>
                         </button>
-                        <button type="button" class="chip-del" title="删除学科" @click.stop="deleteSubject(s)"><ui-icon name="trash"></ui-icon></button>
                     </div>
                 </div>
-                <p class="form-hint">删除学科会连同其下全部知识点、错题、复习记录和报表数据一起清除，且无法恢复。</p>
-                <p v-if="!subjects.length" class="empty-tip">先添加一个学科，再开始搭建知识点目录。</p>
-                <h3 class="section-gap">知识点目录</h3>
-                <div class="dir-search">
-                    <input type="search" v-model="kpSearch" placeholder="输入知识点名称，自动定位到对应目录">
-                </div>
-                <div v-if="kpRows.length" class="dir-tree">
-                    <div v-for="row in kpRows" :key="row.key" class="dir-row" :class="{'dir-subject': row.isSubject, active: !row.isSubject && row.node.id === kpForm.parent_id, flash: row.flash}">
-                        <button type="button" class="dir-toggle" @click="toggleDirRow(row)">
-                            <span class="dir-arrow" :class="{expanded: row.expanded}"><ui-icon name="chevron-right"></ui-icon></span>
-                        </button>
-                        <button type="button" class="dir-label" @click="row.isSubject ? toggleDirRow(row) : openKpDetail(row.node)" :style="{paddingLeft: (row.isSubject ? 0 : row.depth * 22) + 'px'}">
-                            <span class="dir-dot" v-if="row.isSubject"><ui-icon name="folder"></ui-icon></span>
-                            <span class="dir-dot" v-else>●</span>
-                            <span class="dir-name" :class="{highlight: row.highlight}">{{ row.name }}</span>
-                            <span class="badge" v-if="row.count">{{ row.count }}</span>
-                        </button>
-                        <span class="dir-actions">
-                            <button v-if="row.isSubject" type="button" class="mini-btn" @click.stop="startRootKp(row.node)"><ui-icon name="plus"></ui-icon>一级</button>
-                            <template v-else>
-                                <button type="button" class="mini-btn" @click.stop="startDirChild(row.node)"><ui-icon name="plus"></ui-icon>子级</button>
-                                <button type="button" class="mini-btn mini-danger" @click.stop="deleteDirKp(row.node)">删除</button>
-                            </template>
-                        </span>
+                <p v-if="!subjects.length" class="empty-tip">还没有学科，点「新增学科」开始。</p>
+            </div>
+
+            <!-- 知识点目录：改为弹窗操作 -->
+            <div class="settings-block section-gap">
+                <div class="settings-block-head">
+                    <div>
+                        <h3>知识点目录</h3>
+                        <p class="block-desc" v-if="selectedDirSubjectName">当前学科：{{ selectedDirSubjectName }}</p>
+                        <p class="block-desc" v-else>先在上面选择一个学科</p>
+                    </div>
+                    <div class="settings-block-actions">
+                        <button type="button" class="btn-primary" @click="openKpManager" :disabled="!subjects.length"><ui-icon name="folder-tree"></ui-icon><span>管理知识点</span></button>
                     </div>
                 </div>
-                <div v-if="kpSearch && !kpRows.length" class="empty-tip">没有找到匹配的知识点，换个关键词试试。</div>
-                <div v-if="!kpSearch && !kpRows.length" class="empty-tip">该学科还没有知识点，展开学科后点击「一级」开始搭建。</div>
-                <div class="dir-add" v-if="kpForm.subject_id">
-                    <span class="dir-add-label" v-if="settingsKpHint">添加到「{{ settingsKpHint }}」下</span>
-                    <span class="dir-add-label" v-else>在「{{ selectedDirSubjectName }}」下添加一级知识点</span>
-                    <div class="dir-add-line">
-                        <input type="text" ref="settingsKpInput" v-model="kpForm.name" @keyup.enter="addDirKp" placeholder="输入新知识点名称">
-                        <button class="btn-primary" @click="addDirKp">添加知识点</button>
-                        <button v-if="settingsKpHint" type="button" class="btn" @click="clearDirParent">取消挂接</button>
-                    </div>
-                </div>
+                <p v-if="!kpRows.length && selectedDirSubjectName" class="empty-tip">该学科还没有知识点，点「管理知识点」开始搭建。</p>
             </div>
         </section>
     </main>
@@ -988,6 +1005,119 @@
             <div class="modal-actions">
                 <button class="btn-primary" @click="confirmPendingKp">确认绑定</button>
                 <button class="btn" @click="showPendingKpModal=false">忽略</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增学科 -->
+    <div class="modal" v-if="showAddSubjectModal" @click.self="showAddSubjectModal=false">
+        <div class="modal-body modal-narrow">
+            <h3>新增学科</h3>
+            <div class="form-row">
+                <label>学科名称</label>
+                <input type="text" v-model.trim="newSubjectName" placeholder="例如：高中数学" @keyup.enter="confirmAddSubject">
+            </div>
+            <p v-if="addSubjectError" class="form-error">{{ addSubjectError }}</p>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="confirmAddSubject" :disabled="!newSubjectName">确认添加</button>
+                <button class="btn" @click="showAddSubjectModal=false">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 删除学科：先选，再警告 -->
+    <div class="modal" v-if="showDeleteSubjectModal" @click.self="showDeleteSubjectModal=false">
+        <div class="modal-body modal-narrow">
+            <h3>删除学科</h3>
+            <template v-if="!pendingDeleteSubject">
+                <p class="modal-lead">请选择要删除的学科</p>
+                <div class="pick-list">
+                    <button v-for="s in subjects" :key="s.id" type="button" class="pick-item" @click="pickDeleteSubject(s)">
+                        <span class="pick-item-name">{{ s.name }}</span>
+                        <span class="pick-item-meta" v-if="subjectKpCount(s.id)">{{ subjectKpCount(s.id) }} 个知识点</span>
+                    </button>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn" @click="showDeleteSubjectModal=false">取消</button>
+                </div>
+            </template>
+            <template v-else>
+                <div class="danger-panel">
+                    <p class="danger-title">删除后无法撤销</p>
+                    <p>即将删除学科「{{ pendingDeleteSubject.name }}」，该学科下的<strong>所有子节点</strong>会一并删除，包括：</p>
+                    <ul class="danger-list">
+                        <li>{{ subjectKpCount(pendingDeleteSubject.id) }} 个知识点（含全部下级知识点）</li>
+                        <li>{{ pendingDeleteQuestionCount }} 道错题</li>
+                        <li>这些错题的复习记录、复习计划、笔记与学习资源</li>
+                        <li>关联的知识图谱与统计报表数据</li>
+                    </ul>
+                    <p class="danger-note">此操作不可恢复，且无法通过备份还原已删除的内容。</p>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-danger" @click="confirmDeleteSubject" :disabled="deletingSubject">
+                        {{ deletingSubject ? '删除中...' : '确认删除' }}
+                    </button>
+                    <button class="btn" @click="pendingDeleteSubject=null" :disabled="deletingSubject">返回重选</button>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- 知识点管理 -->
+    <div class="modal" v-if="showKpManager" @click.self="closeKpManager">
+        <div class="modal-body modal-wide">
+            <div class="kp-manager-head">
+                <div>
+                    <h3>知识点目录</h3>
+                    <div class="kp-subject-switch">
+                        <button v-for="s in subjects" :key="s.id" type="button" class="chip-main" :class="{active: kpForm.subject_id === s.id}" @click="selectSubjectDir(s)">
+                            {{ s.name }}
+                            <span class="chip-count" v-if="subjectKpCount(s.id)">{{ subjectKpCount(s.id) }}</span>
+                        </button>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" @click="closeKpManager" aria-label="关闭"><ui-icon name="x"></ui-icon></button>
+            </div>
+
+            <div v-if="!kpForm.subject_id" class="empty-tip">请先选择要管理的学科</div>
+            <template v-else>
+                <div class="dir-search">
+                    <input type="search" v-model="kpSearch" placeholder="输入知识点名称，自动定位到对应目录">
+                </div>
+                <div v-if="kpRows.length" class="dir-tree">
+                    <div v-for="row in kpRows" :key="row.key" class="dir-row" :class="{'dir-subject': row.isSubject, active: !row.isSubject && row.node.id === kpForm.parent_id, flash: row.flash}">
+                        <button type="button" class="dir-toggle" @click="toggleDirRow(row)">
+                            <span class="dir-arrow" :class="{expanded: row.expanded}"><ui-icon name="chevron-right"></ui-icon></span>
+                        </button>
+                        <button type="button" class="dir-label" @click="row.isSubject ? toggleDirRow(row) : openKpDetail(row.node)" :style="{paddingLeft: (row.isSubject ? 0 : row.depth * 22) + 'px'}">
+                            <span class="dir-dot" v-if="row.isSubject"><ui-icon name="folder"></ui-icon></span>
+                            <span class="dir-dot" v-else>●</span>
+                            <span class="dir-name" :class="{highlight: row.highlight}">{{ row.name }}</span>
+                            <span class="badge" v-if="row.count">{{ row.count }}</span>
+                        </button>
+                        <span class="dir-actions">
+                            <button v-if="row.isSubject" type="button" class="mini-btn" @click.stop="startRootKp(row.node)"><ui-icon name="plus"></ui-icon>一级</button>
+                            <template v-else>
+                                <button type="button" class="mini-btn" @click.stop="startDirChild(row.node)"><ui-icon name="plus"></ui-icon>子级</button>
+                                <button type="button" class="mini-btn mini-danger" @click.stop="deleteDirKp(row.node)">删除</button>
+                            </template>
+                        </span>
+                    </div>
+                </div>
+                <div v-if="kpSearch && !kpRows.length" class="empty-tip">没有找到匹配的知识点，换个关键词试试。</div>
+                <div v-if="!kpSearch && !kpRows.length" class="empty-tip">该学科还没有知识点，在下方输入名称开始搭建。</div>
+                <div class="dir-add">
+                    <span class="dir-add-label" v-if="settingsKpHint">添加到「{{ settingsKpHint }}」下</span>
+                    <span class="dir-add-label" v-else>在「{{ selectedDirSubjectName }}」下添加一级知识点</span>
+                    <div class="dir-add-line">
+                        <input type="text" ref="settingsKpInput" v-model="kpForm.name" @keyup.enter="addDirKp" placeholder="输入新知识点名称">
+                        <button class="btn-primary" @click="addDirKp">添加知识点</button>
+                        <button v-if="settingsKpHint" type="button" class="btn" @click="clearDirParent">取消挂接</button>
+                    </div>
+                </div>
+            </template>
+            <div class="modal-actions">
+                <button class="btn" @click="closeKpManager">完成</button>
             </div>
         </div>
     </div>

@@ -94,6 +94,17 @@ const appOptions = {
             mobileMenuOpen: false,
             loading: true,
             error: '',
+            // 错题录入方式：manual / camera / file，为空表示还在选择页
+            inputMode: '',
+            // 学科设置弹窗状态
+            showAddSubjectModal: false,
+            newSubjectName: '',
+            addSubjectError: '',
+            showDeleteSubjectModal: false,
+            pendingDeleteSubject: null,
+            pendingDeleteQuestionCount: 0,
+            deletingSubject: false,
+            showKpManager: false,
             authUser: null,
             authMode: 'login',
             authUsername: '',
@@ -186,7 +197,6 @@ const appOptions = {
                 aiResources: [],
                 aiResourcesLoading: false
             },
-            newSubject: '',
             kpForm: { subject_id: null, parent_id: null, name: '' },
             settingsKpHint: '',
             dirExpanded: {},
@@ -616,6 +626,8 @@ const appOptions = {
                 this.trashMode = false;
             }
             this.currentNav = key;
+            // 离开录入页就清掉方式选择，下次进入总是先看到三种方式的挑选页
+            if (key !== 'input') this.inputMode = '';
             if (key === 'library') this.loadLibraryPage();
         },
         isNavActive(nav) {
@@ -1860,6 +1872,18 @@ const appOptions = {
             this.form = this.emptyForm();
             if (this.subjects.length) this.form.subject_id = this.subjects[0].id;
         },
+        // 录入方式选择：进入某种方式前先清掉上一轮的临时状态，
+        // 避免残留的图片、OCR 文案或导入预览串到新的录入里。
+        chooseInputMode(mode) {
+            this.importMessage = '';
+            this.importPreview = [];
+            this.inputMode = mode;
+        },
+        exitInputMode() {
+            this.inputMode = '';
+            this.importMessage = '';
+            this.importPreview = [];
+        },
         async recommendKp() {
             if (!this.form.title_text) {
                 alert('请先输入题干文本');
@@ -2084,44 +2108,81 @@ const appOptions = {
             await axios.delete(`/api/questions/${q.id}/purge`);
             await this.openTrash();
         },
-        async addSubject() {
-            if (!this.newSubject) return;
-            await axios.post('/api/subjects', { name: this.newSubject });
-            this.newSubject = '';
+        // ---- 学科设置：新增 / 删除 / 知识点管理 ----
+        openAddSubjectModal() {
+            this.newSubjectName = '';
+            this.addSubjectError = '';
+            this.showAddSubjectModal = true;
+        },
+        async confirmAddSubject() {
+            const name = (this.newSubjectName || '').trim();
+            if (!name) {
+                this.addSubjectError = '请输入学科名称';
+                return;
+            }
+            // 前端先按后端同样规则挡一次重复名，避免请求后才知道失败
+            if (this.subjects.some(s => s.name === name)) {
+                this.addSubjectError = '该学科已存在';
+                return;
+            }
+            try {
+                await axios.post('/api/subjects', { name });
+            } catch (e) {
+                this.addSubjectError = (e.response && e.response.data && e.response.data.error) || '添加失败，请重试';
+                return;
+            }
+            this.showAddSubjectModal = false;
+            this.newSubjectName = '';
+            this.addSubjectError = '';
             await this.loadSubjects();
         },
-        async deleteSubject(s) {
+        async openDeleteSubjectModal() {
+            this.pendingDeleteSubject = null;
+            this.pendingDeleteQuestionCount = 0;
+            this.showDeleteSubjectModal = true;
+        },
+        async pickDeleteSubject(s) {
+            this.pendingDeleteSubject = s;
+            this.pendingDeleteQuestionCount = await this.subjectQuestionCount(s.id);
+        },
+        async confirmDeleteSubject() {
+            const s = this.pendingDeleteSubject;
             if (!s) return;
-            // 删除是级联且不可恢复的，必须明确告知影响范围再执行
-            const qCount = await this.subjectQuestionCount(s.id);
-            const kpCount = this.subjectKpCount(s.id);
-            let msg = `确定删除学科「${s.name}」？`;
-            if (qCount || kpCount) {
-                msg += `\n\n将一并删除：${kpCount} 个知识点、${qCount} 道错题，以及它们的复习记录、笔记和报表数据。`;
-            }
-            msg += '\n\n此操作无法撤销。';
-            if (!confirm(msg)) return;
+            this.deletingSubject = true;
             try {
                 await axios.delete(`/api/subjects/${s.id}`);
             } catch (e) {
                 alert('删除失败：' + ((e.response && e.response.data && e.response.data.error) || e.message));
+                this.deletingSubject = false;
                 return;
             }
-            // 删掉的正是当前选中的学科时，把目录视图复位，避免残留悬空选中态
+            this.deletingSubject = false;
+            this.showDeleteSubjectModal = false;
+            this.pendingDeleteSubject = null;
+            // 删掉的正是当前选中的学科时复位目录视图，避免残留悬空选中态
             if (this.kpForm.subject_id === s.id) {
                 this.kpForm.subject_id = null;
                 this.kpForm.parent_id = null;
                 this.settingsKpHint = '';
             }
-            // 各视图的学科筛选如果正指着被删的学科，复位成「全部」，避免残留悬空 id
+            // 各视图的学科筛选如果正指着被删的学科，复位成「全部」
             for (const obj of [this.filter, this.weakFilter, this.graphFilter,
                                this.reportFilter, this.reviewFilter]) {
                 if (obj && obj.subject_id === s.id) obj.subject_id = null;
             }
-            this.newSubject = '';
             await this.loadSubjects();
             await this.loadKnowledgePoints();
             await this.loadWeak();
+        },
+        openKpManager() {
+            this.kpSearch = '';
+            this.showKpManager = true;
+        },
+        closeKpManager() {
+            this.showKpManager = false;
+            this.kpSearch = '';
+            this.settingsKpHint = '';
+            this.kpForm.parent_id = null;
         },
         async addKp() {
             if (!this.kpForm.name || !this.kpForm.subject_id) return;
