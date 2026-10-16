@@ -2507,5 +2507,13 @@ if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(err => {
             console.warn('Service Worker 注册失败', err);
         });
+        // 新版本 Service Worker 接管后刷新一次，避免页面继续跑在旧外壳缓存上
+        // （旧外壳会让界面停留在旧样式、登录后接口异常）。
+        let reloading = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (reloading) return;
+            reloading = true;
+            window.location.reload();
+        });
     });
 }

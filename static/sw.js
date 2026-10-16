@@ -1,11 +1,20 @@
-const CACHE_NAME = 'wrongbook-shell-v6';
+const CACHE_NAME = 'wrongbook-shell-v7';
 const META_CACHE = 'wrongbook-sw-meta';
 const META_USER_URL = '/__wrongbook_user_id';
 const USER_CACHE_PREFIX = 'wrongbook-user-';
+// 外壳资源的版本号必须和 index.html 里的 ?v= 完全一致。
+// 之前 install 预缓存的是不带 ?v= 的裸 URL，而 networkFirstStatic 又用
+// ignoreSearch 回查缓存，导致旧版 app.js/style.css 在新版发布后仍被命中，
+// 表现为「界面变回旧样式、登录进不去」。改为缓存真实请求 URL，并且不做
+// 忽略查询串的匹配，让版本号真正起到失效作用。
+const SHELL_VERSION = '20261016apple';
 const APP_SHELL = [
     '/',
-    '/static/style.css',
-    '/static/app.js',
+    '/static/styles/tokens.css?v=' + SHELL_VERSION,
+    '/static/styles/base.css?v=' + SHELL_VERSION,
+    '/static/styles/motion.css?v=' + SHELL_VERSION,
+    '/static/style.css?v=' + SHELL_VERSION,
+    '/static/app.js?v=' + SHELL_VERSION,
     '/static/vue.global.js',
     '/static/axios.min.js',
     '/static/vendor/echarts.min.js',
@@ -53,7 +62,7 @@ self.addEventListener('activate', event => {
                         // 外壳缓存只保留当前版本
                         if (key.startsWith('wrongbook-shell-')) return key !== CACHE_NAME;
                         // 每用户缓存只保留当前版本，避免残留过期的接口数据
-                        if (key.startsWith(USER_CACHE_PREFIX)) return !key.endsWith('-v6');
+                        if (key.startsWith(USER_CACHE_PREFIX)) return !key.endsWith('-v7');
                         return false;
                     })
                     .map(key => caches.delete(key))
@@ -132,7 +141,7 @@ async function clearUserCaches() {
 async function getUserCache() {
     const userId = await getCurrentUserId();
     if (!userId) return null;
-    return caches.open(USER_CACHE_PREFIX + userId + '-v6');
+    return caches.open(USER_CACHE_PREFIX + userId + '-v7');
 }
 
 async function networkFirstApi(request, url) {
@@ -178,7 +187,9 @@ async function networkFirstStatic(request) {
         if (response.ok) await cache.put(request, response.clone());
         return response;
     } catch (error) {
-        const cached = await cache.match(request, { ignoreSearch: true });
+        // 严格按完整 URL（含 ?v= 版本号）匹配。之前用 ignoreSearch，会把
+        // 不带版本号的旧条目当成新请求的缓存返回，导致界面回退到旧版本。
+        const cached = await cache.match(request);
         if (cached) return cached;
         throw error;
     }
