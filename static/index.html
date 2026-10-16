@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#2563eb">
+    <meta name="theme-color" content="#B08B5A">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -12,7 +12,10 @@
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <link rel="icon" href="/static/icons/icon-192.png">
     <title>错题本知识溯源整理助手</title>
-    <link rel="stylesheet" href="/static/style.css?v=20261007ui">
+    <link rel="stylesheet" href="/static/styles/tokens.css?v=20261016apple">
+    <link rel="stylesheet" href="/static/styles/base.css?v=20261016apple">
+    <link rel="stylesheet" href="/static/styles/motion.css?v=20261016apple">
+    <link rel="stylesheet" href="/static/style.css?v=20261016apple">
     <script src="/static/vue.global.js"></script>
     <script src="/static/axios.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -116,7 +119,7 @@
 
             <main class="app-main">
         <!-- 仪表盘 -->
-        <section v-if="currentNav==='dashboard'" class="section">
+        <section v-if="currentNav==='dashboard'" class="section dashboard-section">
             <div class="kpi-grid">
                 <div class="card kpi">
                     <div class="card-title">总错题数</div>
@@ -244,7 +247,7 @@
                     <div class="kp-tags">
                         <span class="kp-tag" v-for="(kp, idx) in form.knowledge_points" :key="kp.id">
                             {{ kp.name }} <small>({{ (kp.confidence*100).toFixed(0) }}%)</small>
-                            <button type="button" @click="removeKp(idx)" style="background:#dc2626;color:#ffffff;border:1px solid #991b1b;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px;line-height:1.5">删除</button>
+                            <button type="button" class="btn-sm btn-danger" @click="removeKp(idx)">删除</button>
                         </span>
                         <button type="button" class="btn-sm" @click="showKpSelector=true">+ 添加</button>
                         <button type="button" class="btn-sm btn-ai" @click="recommendKp" :disabled="recommending">
@@ -321,7 +324,7 @@
                         </div>
                         <div class="q-actions">
                             <button class="btn-sm" @click="editQuestion(q)">编辑</button>
-                            <button type="button" @click="deleteQuestion(q)" style="background:#dc2626;color:#ffffff;border:2px solid #991b1b;border-radius:6px;padding:6px 14px;font-size:15px;font-weight:700;cursor:pointer">删除</button>
+                            <button type="button" class="btn-sm btn-danger" @click="deleteQuestion(q)">删除</button>
                         </div>
                     </div>
                 </div>
@@ -350,7 +353,7 @@
                         </div>
                         <div class="q-actions">
                             <button type="button" class="btn-sm btn-primary" @click="restoreQuestion(q)">恢复</button>
-                            <button type="button" class="btn-sm" @click="purgeQuestion(q)" style="background:#dc2626;color:#fff;border-color:#991b1b">彻底删除</button>
+                            <button type="button" class="btn-sm btn-danger" @click="purgeQuestion(q)">彻底删除</button>
                         </div>
                     </div>
                 </div>
@@ -384,9 +387,9 @@
                     </tbody>
                 </table>
             </div>
-            <h3 style="margin-top:24px">近 30 天错误趋势</h3>
+            <h3 class="section-gap">近 30 天错误趋势</h3>
             <div ref="trendChartEl" class="chart-box"></div>
-            <h3 style="margin-top:24px">复习优先级建议</h3>
+            <h3 class="section-gap">复习优先级建议</h3>
             <p v-if="!priorityData.length" class="empty-tip">暂无可分析的薄弱知识点。</p>
             <div class="priority-list" v-else>
                 <div v-for="p in priorityData" :key="p.id" class="priority-item">
@@ -398,7 +401,7 @@
                     <span class="priority-score">薄弱指数 {{ p.weak_index }}</span>
                 </div>
             </div>
-            <h3 style="margin-top:24px">搭建 {{ currentWeakSubjectName || '当前学科' }} 知识树</h3>
+            <h3 class="section-gap">搭建 {{ currentWeakSubjectName || '当前学科' }} 知识树</h3>
             <div class="weak-kp-add">
                 <input type="text" v-model="weakKpName" @keyup.enter="addWeakKp" placeholder="新知识点名称，如：三角函数" ref="weakKpInput">
                 <select v-model.number="weakParentId">
@@ -579,7 +582,7 @@
                     </details>
                     <p v-if="!reviewPlans.length" class="empty-tip">还没有复习计划，可以点「生成今日复习计划」或进入错题后自定义日期。</p>
                 </div>
-                <h3 style="margin-top:20px">按知识点分类</h3>
+                <h3 class="section-gap">按知识点分类</h3>
                 <div class="review-kp-grid">
                     <button type="button" v-for="kp in reviewKps" :key="kp.id" class="review-kp-card" @click="selectReviewKp(kp)">
                         <span class="review-kp-name" :style="{paddingLeft: kp.level * 14 + 'px'}">{{ kp.name }}</span>
@@ -651,13 +654,17 @@
                     <button class="btn-primary" @click="addSubject">添加</button>
                 </div>
                 <div class="subject-chips">
-                    <button type="button" v-for="s in subjects" :key="s.id" class="subject-chip" :class="{active: kpForm.subject_id === s.id}" @click="selectSubjectDir(s)">
-                        {{ s.name }}
-                        <span class="chip-count" v-if="subjectKpCount(s.id)">{{ subjectKpCount(s.id) }}</span>
-                    </button>
+                    <div v-for="s in subjects" :key="s.id" class="subject-chip" :class="{active: kpForm.subject_id === s.id}">
+                        <button type="button" class="chip-main" @click="selectSubjectDir(s)">
+                            {{ s.name }}
+                            <span class="chip-count" v-if="subjectKpCount(s.id)">{{ subjectKpCount(s.id) }}</span>
+                        </button>
+                        <button type="button" class="chip-del" title="删除学科" @click.stop="deleteSubject(s)"><ui-icon name="trash"></ui-icon></button>
+                    </div>
                 </div>
+                <p class="form-hint">删除学科会连同其下全部知识点、错题、复习记录和报表数据一起清除，且无法恢复。</p>
                 <p v-if="!subjects.length" class="empty-tip">先添加一个学科，再开始搭建知识点目录。</p>
-                <h3 style="margin-top:20px">知识点目录</h3>
+                <h3 class="section-gap">知识点目录</h3>
                 <div class="dir-search">
                     <input type="search" v-model="kpSearch" placeholder="输入知识点名称，自动定位到对应目录">
                 </div>
@@ -716,19 +723,19 @@
             <div class="form-row"><input v-model.trim="accountForm.new_username" placeholder="新账号（字母或数字）"></div>
             <div class="form-row"><input type="password" v-model="accountForm.rename_password" placeholder="当前密码"></div>
             <button type="button" class="btn-primary" @click="renameAccount">修改账号</button>
-            <h4 style="margin-top:20px">修改密码</h4>
+            <h4 class="section-gap">修改密码</h4>
             <div class="form-row"><input type="password" v-model="accountForm.old_password" placeholder="当前密码"></div>
             <div class="form-row"><input type="password" v-model="accountForm.new_password" placeholder="新密码（字母或数字）"></div>
             <div class="form-row"><input type="password" v-model="accountForm.confirm_password" placeholder="确认新密码"></div>
             <button type="button" class="btn-primary" @click="changePassword">修改密码</button>
-            <h4 style="margin-top:20px">数据备份与恢复</h4>
+            <h4 class="section-gap">数据备份与恢复</h4>
             <div class="review-detail-actions">
                 <a class="btn" href="/api/backup/export">导出数据包</a>
                 <label class="btn" style="cursor:pointer">导入数据包<input type="file" accept=".zip,.json,.db,.sqlite,.sqlite3" hidden @change="importBackupPackage"></label>
             </div>
-            <h4 style="margin-top:20px;color:#b91c1c">删除账号</h4>
+            <h4 class="section-gap danger-heading">删除账号</h4>
             <div class="form-row"><input type="password" v-model="accountForm.delete_password" placeholder="输入密码确认删除"></div>
-            <button type="button" class="btn" @click="deleteAccount" style="color:#b91c1c;border-color:#fca5a5">永久删除账号及全部数据</button>
+            <button type="button" class="btn btn-danger" @click="deleteAccount">永久删除账号及全部数据</button>
             <div class="modal-actions"><button class="btn" @click="showAccountModal=false">关闭</button></div>
         </div>
     </div>
@@ -760,7 +767,7 @@
                 <label>模型</label>
                 <input type="text" v-model="settings.llm_model" placeholder="deepseek-chat 或 qwen-turbo">
             </div>
-            <h4 style="margin-top:18px">OCR 参数</h4>
+            <h4 class="section-gap">OCR 参数</h4>
             <div class="form-row">
                 <label>OCR 识别</label>
                 <select v-model="settings.ocr_enabled">
@@ -788,7 +795,7 @@
                 <label>置信度阈值（低于该值的结果会被忽略）</label>
                 <input type="number" v-model="settings.ocr_confidence_threshold" min="0" max="1" step="0.05">
             </div>
-            <h4 style="margin-top:18px">知识点推荐阈值</h4>
+            <h4 class="section-gap">知识点推荐阈值</h4>
             <div class="form-row">
                 <label>自动绑定阈值（达到即自动绑定）</label>
                 <input type="number" v-model="settings.kp_auto_threshold" min="0" max="1" step="0.05">
@@ -858,7 +865,7 @@
                     <div class="kp-tags">
                         <span class="kp-tag" v-for="(kp, idx) in form.knowledge_points" :key="kp.id">
                             {{ kp.name }} <small>({{ (kp.confidence*100).toFixed(0) }}%)</small>
-                            <button type="button" @click="removeKp(idx)" style="background:#dc2626;color:#fff;border:1px solid #991b1b;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px">删除</button>
+                            <button type="button" class="btn-sm btn-danger" @click="removeKp(idx)">删除</button>
                         </span>
                         <button type="button" class="btn-sm" @click="showKpSelector=true">+ 添加</button>
                         <button type="button" class="btn-sm btn-ai" @click="recommendKp" :disabled="recommending">{{ recommending ? 'AI推荐中...' : 'AI推荐知识点' }}</button>
@@ -1156,7 +1163,7 @@
                         <textarea v-model="m.content" rows="8" class="ai-content" style="margin-top:8px"></textarea>
                         <div class="review-detail-actions" style="margin-top:8px">
                             <button type="button" class="btn-primary" @click="saveMaterialEdit(m)">保存修改</button>
-                            <button type="button" class="btn" @click="deleteMaterial(m, 'graphDetail')" style="color:#b91c1c">删除</button>
+                            <button type="button" class="btn btn-danger" @click="deleteMaterial(m, 'graphDetail')">删除</button>
                         </div>
                     </details>
                 </div>
@@ -1207,10 +1214,10 @@
                         <p v-if="r.attachment" class="typical-source">附件：<a :href="r.attachment" target="_blank">打开附件</a></p>
                         <div class="review-detail-actions" style="margin-top:8px">
                             <button type="button" class="btn-primary" @click="saveResource(r)">保存修改</button>
-                            <button type="button" class="btn" @click="deleteResource(r)" style="color:#b91c1c">删除</button>
+                            <button type="button" class="btn btn-danger" @click="deleteResource(r)">删除</button>
                         </div>
                     </details>
-                    <h4 style="margin-top:14px">新增我的资源</h4>
+                    <h4 class="section-gap">新增我的资源</h4>
                     <div class="resource-grid">
                         <select v-model="graphDetail.resourceForm.type">
                             <option value="textbook">教材页码</option>
@@ -1251,7 +1258,7 @@
                     <textarea v-model="m.content" rows="8" class="ai-content" style="margin-top:8px"></textarea>
                     <div class="review-detail-actions" style="margin-top:8px">
                         <button type="button" class="btn-primary" @click="saveMaterialEdit(m)">保存修改</button>
-                        <button type="button" class="btn" @click="deleteMaterial(m, 'kpDetail')" style="color:#b91c1c">删除</button>
+                        <button type="button" class="btn btn-danger" @click="deleteMaterial(m, 'kpDetail')">删除</button>
                     </div>
                 </details>
             </div>
@@ -1324,6 +1331,6 @@
     </div>
     </template>
 </div>
-    <script src="/static/app.js?v=20261007ui"></script>
+    <script src="/static/app.js?v=20261016apple"></script>
 </body>
 </html>

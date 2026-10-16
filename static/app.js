@@ -3,6 +3,11 @@ const { createApp } = Vue;
 const SESSION_EXPIRED_FLAG = 'wrongbook_session_expired';
 let csrfToken = '';
 
+function cssToken(name) {
+    // 图表与 SVG 也统一读取设计令牌，避免前后端出现两套颜色。
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 function rememberCsrfToken(data) {
     if (data && data.csrf_token) {
         csrfToken = data.csrf_token;
@@ -895,10 +900,10 @@ const appOptions = {
                         type: 'pie',
                         radius: ['42%', '70%'],
                         data: [
-                            { name: '未掌握', value: sc[0] || 0, itemStyle: { color: '#dc2626' } },
-                            { name: '已掌握', value: sc[1] || 0, itemStyle: { color: '#059669' } },
-                            { name: '已复习', value: sc[2] || 0, itemStyle: { color: '#f59e0b' } },
-                            { name: '已归档', value: sc[3] || 0, itemStyle: { color: '#6b7280' } }
+                            { name: '未掌握', value: sc[0] || 0, itemStyle: { color: cssToken('--c-danger') } },
+                            { name: '已掌握', value: sc[1] || 0, itemStyle: { color: cssToken('--c-success') } },
+                            { name: '已复习', value: sc[2] || 0, itemStyle: { color: cssToken('--c-warning') } },
+                            { name: '已归档', value: sc[3] || 0, itemStyle: { color: cssToken('--c-text-muted') } }
                         ]
                     }]
                 });
@@ -915,7 +920,7 @@ const appOptions = {
                     series: [{
                         type: 'bar',
                         data: items.map(x => x.weak_index),
-                        itemStyle: { color: '#2563eb', borderRadius: [0, 4, 4, 0] }
+                        itemStyle: { color: cssToken('--c-brand-500'), borderRadius: [0, 4, 4, 0] }
                     }]
                 });
             }
@@ -942,16 +947,16 @@ const appOptions = {
                         type: 'line',
                         smooth: true,
                         data: this.trendData.map(d => d.added),
-                        itemStyle: { color: '#2563eb' },
-                        areaStyle: { color: 'rgba(37,99,235,0.12)' }
+                        itemStyle: { color: cssToken('--c-brand-500') },
+                        areaStyle: { color: cssToken('--c-brand-100') }
                     },
                     {
                         name: '复习仍错',
                         type: 'line',
                         smooth: true,
                         data: this.trendData.map(d => d.wrong_reviews),
-                        itemStyle: { color: '#dc2626' },
-                        areaStyle: { color: 'rgba(220,38,38,0.10)' }
+                        itemStyle: { color: cssToken('--c-danger') },
+                        areaStyle: { color: cssToken('--c-surface-muted') }
                     }
                 ]
             });
@@ -998,7 +1003,7 @@ const appOptions = {
                         edgeShape: 'curve',
                         label: { position: 'left', align: 'right', fontSize: 13 },
                         leaves: { label: { position: 'right', align: 'left' } },
-                        lineStyle: { color: '#93c5fd', width: 2 },
+                        lineStyle: { color: cssToken('--c-brand-300'), width: 2 },
                         emphasis: { focus: 'descendant' }
                     }]
                 });
@@ -1010,7 +1015,7 @@ const appOptions = {
                         data: data.children || [],
                         radius: [20, '90%'],
                         label: { rotate: 'radial', fontSize: 12 },
-                        itemStyle: { borderColor: '#fff', borderWidth: 2 },
+                        itemStyle: { borderColor: cssToken('--c-surface'), borderWidth: 2 },
                         levels: [
                             {},
                             { r0: '20%', r: '45%', label: { rotate: 'tangential' } },
@@ -1086,7 +1091,7 @@ const appOptions = {
                 });
                 this.graphDetail.aiContent = this.humanizeMath(this.graphDetail.aiContent);
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || '生成失败');
+                alert((err.response && err.response.data && err.response.data.error) || err.message || '生成失败');
             } finally {
                 this.graphDetail.aiLoading = false;
             }
@@ -1258,7 +1263,7 @@ const appOptions = {
                 });
                 this.reviewAiContent = this.humanizeMath(this.reviewAiContent);
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || 'AI 解答失败');
+                alert((err.response && err.response.data && err.response.data.error) || err.message || 'AI 解答失败');
             } finally {
                 this.reviewAiLoading = false;
             }
@@ -1325,9 +1330,9 @@ const appOptions = {
             return ['未掌握', '已掌握', '已复习', '已归档'][s] || '未知';
         },
         heatColor(v) {
-            if (v >= 7) return '#dc2626';
-            if (v >= 4) return '#f59e0b';
-            return '#059669';
+            if (v >= 7) return cssToken('--c-danger');
+            if (v >= 4) return cssToken('--c-warning');
+            return cssToken('--c-success');
         },
         async openCamera() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -1740,9 +1745,11 @@ const appOptions = {
             return false;
         },
         async streamAi(payload, onDelta) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
             const response = await fetch('/api/ai/stream', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers,
                 body: JSON.stringify(payload)
             });
             if (!response.ok) {
@@ -1799,7 +1806,7 @@ const appOptions = {
                 this.aiModal.content = this.humanizeMath(res.data.content || '');
             } catch (err) {
                 this.aiModal.content = '';
-                alert((err.response && err.response.data && err.response.data.error) || '生成失败');
+                alert((err.response && err.response.data && err.response.data.error) || err.message || '生成失败');
             } finally {
                 this.aiLoading = false;
             }
@@ -2084,10 +2091,37 @@ const appOptions = {
             await this.loadSubjects();
         },
         async deleteSubject(s) {
-            if (!confirm(`确定删除学科 ${s.name}？`)) return;
-            await axios.delete(`/api/subjects/${s.id}`);
+            if (!s) return;
+            // 删除是级联且不可恢复的，必须明确告知影响范围再执行
+            const qCount = await this.subjectQuestionCount(s.id);
+            const kpCount = this.subjectKpCount(s.id);
+            let msg = `确定删除学科「${s.name}」？`;
+            if (qCount || kpCount) {
+                msg += `\n\n将一并删除：${kpCount} 个知识点、${qCount} 道错题，以及它们的复习记录、笔记和报表数据。`;
+            }
+            msg += '\n\n此操作无法撤销。';
+            if (!confirm(msg)) return;
+            try {
+                await axios.delete(`/api/subjects/${s.id}`);
+            } catch (e) {
+                alert('删除失败：' + ((e.response && e.response.data && e.response.data.error) || e.message));
+                return;
+            }
+            // 删掉的正是当前选中的学科时，把目录视图复位，避免残留悬空选中态
+            if (this.kpForm.subject_id === s.id) {
+                this.kpForm.subject_id = null;
+                this.kpForm.parent_id = null;
+                this.settingsKpHint = '';
+            }
+            // 各视图的学科筛选如果正指着被删的学科，复位成「全部」，避免残留悬空 id
+            for (const obj of [this.filter, this.weakFilter, this.graphFilter,
+                               this.reportFilter, this.reviewFilter]) {
+                if (obj && obj.subject_id === s.id) obj.subject_id = null;
+            }
+            this.newSubject = '';
             await this.loadSubjects();
             await this.loadKnowledgePoints();
+            await this.loadWeak();
         },
         async addKp() {
             if (!this.kpForm.name || !this.kpForm.subject_id) return;
@@ -2219,6 +2253,18 @@ const appOptions = {
         subjectKpCount(sid) {
             return this.knowledgePoints.filter(k => k.subject_id === sid).length;
         },
+        // 删除学科前的连带提示用。questions 只是首页预览的 5 条，不能拿来计数，
+        // 这里按学科现拉一次总数，避免把「3 道」显示成实际有 40 道。
+        async subjectQuestionCount(sid) {
+            try {
+                const res = await axios.get('/api/questions/page', {
+                    params: { page: 1, page_size: 1, subject_id: sid }
+                });
+                return res.data.total || 0;
+            } catch (e) {
+                return 0;
+            }
+        },
         async addDirKp() {
             const name = (this.kpForm.name || '').trim();
             if (!name) {
@@ -2323,12 +2369,12 @@ const AppLogo = {
     },
     template: `
         <svg :width="size" :height="size" viewBox="0 0 48 48" fill="none" role="img" aria-label="错题本知识溯源整理助手">
-            <rect x="2" y="2" width="44" height="44" rx="11" fill="#1e3a8a"/>
-            <path d="M11 17.5c4.4-2 8.6-2 12.5 0v16c-3.9-1.7-8.1-1.7-12.5 0V17.5z" fill="#ffffff"/>
-            <path d="M24.5 17.5c3.9-2 8.1-2 12.5 0v16c-4.4-1.7-8.6-1.7-12.5 0V17.5z" fill="#c7d2fe"/>
-            <circle cx="16" cy="25" r="2.2" fill="#34d399"/>
-            <circle cx="32" cy="25" r="2.2" fill="#34d399"/>
-            <path d="M18.2 25h11.6" stroke="#34d399" stroke-width="1.8" stroke-linecap="round"/>
+            <rect x="2" y="2" width="44" height="44" rx="11" fill="var(--c-brand-700)"/>
+            <path d="M11 17.5c4.4-2 8.6-2 12.5 0v16c-3.9-1.7-8.1-1.7-12.5 0V17.5z" fill="var(--c-surface)"/>
+            <path d="M24.5 17.5c3.9-2 8.1-2 12.5 0v16c-4.4-1.7-8.6-1.7-12.5 0V17.5z" fill="var(--c-brand-100)"/>
+            <circle cx="16" cy="25" r="2.2" fill="var(--c-brand-500)"/>
+            <circle cx="32" cy="25" r="2.2" fill="var(--c-brand-500)"/>
+            <path d="M18.2 25h11.6" stroke="var(--c-brand-500)" stroke-width="1.8" stroke-linecap="round"/>
         </svg>`
 };
 

@@ -33,7 +33,7 @@ echo [INFO] Using Python: "%PYTHON_EXE%"
 "%PYTHON_EXE%" --version
 if errorlevel 1 goto :nopython
 
-"%PYTHON_EXE%" -c "import flask, sqlalchemy, requests, docx, PyPDF2, fitz" >nul 2>nul
+"%PYTHON_EXE%" -c "import flask, sqlalchemy, requests, docx, pymupdf" >nul 2>nul
 if errorlevel 1 goto :install
 goto :run
 

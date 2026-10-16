@@ -5,7 +5,7 @@ import io
 import os
 from datetime import datetime
 
-import fitz
+import pymupdf
 from docx import Document
 from docx.shared import Pt
 
@@ -118,7 +118,7 @@ def build_word(data):
 
 
 def build_pdf(data):
-    doc = fitz.open()
+    doc = pymupdf.open()
     page = doc.new_page()
     fontname = 'china'
     fontfile = FONT_PATH if os.path.exists(FONT_PATH) else None

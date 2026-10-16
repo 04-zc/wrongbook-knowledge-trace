@@ -11,8 +11,7 @@ import threading
 import zipfile
 import requests
 import docx
-from PyPDF2 import PdfReader
-import fitz
+import pymupdf
 from flask import Flask, request, jsonify, send_from_directory, session, send_file, Response, stream_with_context
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -273,6 +272,40 @@ def handle_conflict_error(e):
         'current': getattr(e, 'current', None)
     }), 409
 
+# ---------- security headers ----------
+# 全部资源都在本机（Vue/Katex/ECharts 自托管，KaTeX 字体走相对路径 fonts/）。
+#
+# script-src 必须保留 'unsafe-eval'：本项目用 vue.global.js 完整版，
+# 模板编译发生在浏览器端，编译器用 new Function() 生成渲染函数。
+# 没有它 Vue 直接白屏（已用真实 Chrome 验证：去掉后整站无法渲染）。
+# 这与"没有内联脚本、没有外链脚本"并不矛盾——eval 只被 Vue 编译器自己用，
+# 真正的 XSS 防线靠前端 17 处渲染点统一 escapeHtml + object-src none。
+# style-src 保留 'unsafe-inline' 是因为模板里有 20+ 处静态 style 属性和
+# Vue :style 动态绑定，收紧会让布局错乱——CSS 注入的危害远小于脚本注入。
+# frame-ancestors/base-uri/form-action 额外堵住点击劫持和表单劫持。
+CSP_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-eval'",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
+    "img-src 'self' data:",
+    "connect-src 'self'",
+    "media-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+
+def add_security_headers(resp):
+    resp.headers['Content-Security-Policy'] = CSP_POLICY
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['X-Frame-Options'] = 'DENY'
+    resp.headers['Referrer-Policy'] = 'no-referrer'
+    return resp
+
+
 @app.after_request
 def add_cors(resp):
     # 本地单机部署，不需要跨域共享；原先的通配 Origin 会让任意站点
@@ -283,6 +316,7 @@ def add_cors(resp):
         resp.headers['Vary'] = 'Origin'
     resp.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
     resp.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+    add_security_headers(resp)
     # 开发阶段禁用静态文件缓存，避免前端改了不生效
     if request.path.startswith('/static/'):
         resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -520,7 +554,7 @@ def extract_docx_text(path):
     return '\n'.join(lines)
 
 def extract_pdf_text(path):
-    doc = fitz.open(path)
+    doc = pymupdf.open(path)
     page_count = len(doc)
     text = '\n'.join(page.get_text() for page in doc)
     ocr_used = False

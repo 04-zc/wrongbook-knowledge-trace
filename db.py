@@ -5,6 +5,7 @@ import math
 import sqlite3
 import uuid
 import contextvars
+import json
 from datetime import datetime, timedelta
 from sqlalchemy import (
     create_engine, Column, Integer, String, Text, DateTime,
@@ -117,7 +118,7 @@ class Question(Base):
             'subject_name': self.subject.name if self.subject else None,
             'title_text': self.title_text,
             'title_image': self.title_image,
-            'options': self.options,
+            'options': _load_options(self.options),
             'user_answer': self.user_answer,
             'correct_answer': self.correct_answer,
             'analysis': self.analysis,
@@ -705,6 +706,35 @@ def get_question(qid):
     session.close()
     return result
 
+def _load_options(value):
+    """读取时把 options 还原成数组，历史数据可能是 Python repr，按尽力解析处理。"""
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _dump_options(value):
+    """options 列是 Text，前端表单传来的是数组，这里统一序列化成合法 JSON 字符串。
+
+    str(list) 会得到 Python repr（单引号），既不是合法 JSON，又会让任何
+    JSON.parse 调用失败；list 直接交给 sqlite3 则会在 UPDATE 时抛 InterfaceError。
+    """
+    if value is None:
+        return '[]'
+    if isinstance(value, str):
+        return value or '[]'
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return '[]'
+
+
 def _sync_kp_links(session, question, kp_list):
     session.execute(QuestionKP.__table__.delete().where(QuestionKP.question_id == question.id))
     if not kp_list:
@@ -715,15 +745,23 @@ def _sync_kp_links(session, question, kp_list):
     ).scalars().all())
     seen = set()
     for kp in kp_list:
-        kid = kp.get('id')
+        # 既接受 [{"id":1,"confidence":0.9}]，也接受前端批量接口的 [1, 2] 纯 id 数组
+        if isinstance(kp, dict):
+            kid = kp.get('id')
+            is_auto = kp.get('is_auto', 0)
+            confidence = kp.get('confidence', 0.0)
+        else:
+            kid = kp
+            is_auto = 0
+            confidence = 0.0
         if not kid or kid not in owned or kid in seen:
             continue
         seen.add(kid)
         session.add(QuestionKP(
             question_id=question.id,
             kp_id=kid,
-            is_auto=kp.get('is_auto', 0),
-            confidence=kp.get('confidence', 0.0)
+            is_auto=is_auto,
+            confidence=confidence
         ))
 
 def add_question(data):
@@ -747,7 +785,7 @@ def add_question(data):
         subject_id=subject_id,
         title_text=data.get('title_text', ''),
         title_image=data.get('title_image', ''),
-        options=str(data.get('options', [])),
+        options=_dump_options(data.get('options', [])),
         user_answer=data.get('user_answer', ''),
         correct_answer=data.get('correct_answer', ''),
         analysis=data.get('analysis', ''),
@@ -790,10 +828,13 @@ def update_question(qid, data):
         if not subj:
             session.close()
             raise ValueError('学科无效或不属于当前用户')
-    for field in ['subject_id', 'title_text', 'title_image', 'options', 'user_answer',
+    for field in ['subject_id', 'title_text', 'title_image', 'user_answer',
                   'correct_answer', 'analysis', 'mistake_reason', 'status']:
         if field in data:
             setattr(q, field, data[field])
+    # options 必须走序列化，否则前端传来的数组会在 UPDATE 时触发 sqlite3.InterfaceError
+    if 'options' in data:
+        q.options = _dump_options(data['options'])
     if 'knowledge_points' in data:
         _sync_kp_links(session, q, data['knowledge_points'])
     # 任何修改都推进版本号，只改知识点关联也能被冲突检测发现
@@ -1350,7 +1391,10 @@ def export_user_data(user_id):
     def rows(sql, params=()):
         return [dict(r) for r in conn.execute(sql, params).fetchall()]
     qids = [r['id'] for r in conn.execute('SELECT id FROM questions WHERE user_id=?', (user_id,)).fetchall()]
-    kpids = [r['id'] for r in conn.execute('SELECT id FROM knowledge_points WHERE user_id=?', (user_id,)).fetchall()]
+    # 备份包里绝不能出现明文 API Key：备份 ZIP/JSON 会被用户拷贝、网盘同步，
+    # 一旦外泄就是可直接计费的凭据。导出时剔除，导入时本来也不接受该键。
+    settings = [s for s in rows('SELECT * FROM settings WHERE user_id=?', (user_id,))
+                if s.get('key') != 'llm_api_key']
     data = {
         'version': 1,
         'subjects': rows('SELECT * FROM subjects WHERE user_id=?', (user_id,)),
@@ -1364,7 +1408,7 @@ def export_user_data(user_id):
             'SELECT * FROM review_logs WHERE question_id IN (%s)' % ','.join('?' * len(qids)),
             qids
         ) if qids else [],
-        'settings': rows('SELECT * FROM settings WHERE user_id=?', (user_id,)),
+        'settings': settings,
         'ai_materials': rows('SELECT * FROM ai_materials WHERE user_id=?', (user_id,)),
         'learning_resources': rows('SELECT * FROM learning_resources WHERE user_id=?', (user_id,)),
         'review_plans': rows('SELECT * FROM review_plans WHERE user_id=?', (user_id,)),
@@ -1413,6 +1457,8 @@ def export_user_sqlite(user_id):
         for table in ['question_kp', 'ai_materials', 'learning_resources', 'kp_feedback']:
             conn.execute(f'DELETE FROM {table}')
     conn.execute('DELETE FROM users WHERE id != ?', (user_id,))
+    # 同上：明文 Key 不随备份外流
+    conn.execute("DELETE FROM settings WHERE key = 'llm_api_key'")
     conn.commit()
     conn.close()
     return target
@@ -1530,7 +1576,7 @@ def import_user_data(user_id, data):
             subject_id=subject_map.get(q.get('subject_id')),
             title_text=q.get('title_text', ''),
             title_image=q.get('title_image', ''),
-            options=q.get('options', '[]'),
+            options=_dump_options(q.get('options', '[]')),
             user_answer=q.get('user_answer', ''),
             correct_answer=q.get('correct_answer', ''),
             analysis=q.get('analysis', ''),
@@ -1572,10 +1618,17 @@ def import_user_data(user_id, data):
         ))
     session.commit()
     session.close()
-    # 其他附属数据按映射恢复
+    # 其他附属数据按映射恢复。llm_api_key 属于导入方自己的凭据，
+    # 备份包里的同键值会让导入方静默换上别人的 Key，因此只导入白名单内的偏好项。
+    IMPORTABLE_SETTINGS = {
+        'llm_model', 'ocr_enabled', 'ocr_lang', 'ocr_use_orientation',
+        'ocr_confidence_threshold', 'kp_auto_threshold', 'kp_pending_threshold',
+        'reminder_enabled', 'reminder_time',
+    }
     for s in data.get('settings', []):
-        if s.get('key'):
-            set_setting(s['key'], s.get('value', ''))
+        key = s.get('key')
+        if key and key in IMPORTABLE_SETTINGS:
+            set_setting(key, s.get('value', ''))
     for m in data.get('ai_materials', []):
         if m.get('kp_id') in kp_map:
             add_ai_material(kp_map[m['kp_id']], m.get('type', 'custom'), m.get('content', ''))
