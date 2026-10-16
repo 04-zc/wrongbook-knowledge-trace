@@ -2339,12 +2339,15 @@
 }
 
 /* textarea 形态的 .ai-content：文本域默认宽度约 20 列，
-   不显式撑满就会只占弹窗一半，看起来很不协调。 */
+   不显式撑满就会只占弹窗一半，看起来很不协调。
+   这里必须 overflow-y: auto —— 内容超出时可以用滚轮上下翻看全文；
+   曾经的 hidden 会把超出部分直接裁掉且无法滚动。 */
 textarea.ai-content {
     display: block;
     min-height: 96px;
-    resize: none;
-    overflow-y: hidden;
+    max-height: 46dvh;
+    resize: vertical;
+    overflow-y: auto;
 }
 
 .plan-head {
