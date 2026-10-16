@@ -184,7 +184,10 @@
 
         <!-- 错题录入 -->
         <section v-if="currentNav==='input'" class="section">
-            <h2>错题录入</h2>
+            <div class="section-head">
+                <h2>错题录入</h2>
+                <button v-if="inputMode" type="button" class="btn" @click="exitInputMode"><ui-icon name="arrow-left"></ui-icon><span>返回</span></button>
+            </div>
 
             <!-- 第一步：选择录入方式 -->
             <div v-if="!inputMode" class="input-mode-picker">
@@ -245,20 +248,20 @@
 
                 <div class="form-row">
                     <label>题干文本</label>
-                    <textarea v-model="form.title_text" rows="4" placeholder="输入题目，支持 LaTeX：$x^2$ 或 $$公式$$"></textarea>
+                    <textarea v-model="form.title_text" class="auto-grow" rows="2" placeholder=""></textarea>
                     <div v-if="form.title_text" class="latex-preview" v-html="latexHtml(form.title_text)"></div>
                 </div>
                 <div class="form-row">
                     <label>正确答案</label>
-                    <textarea v-model="form.correct_answer" rows="2"></textarea>
+                    <textarea v-model="form.correct_answer" class="auto-grow" rows="1"></textarea>
                 </div>
                 <div class="form-row">
                     <label>学生答案</label>
-                    <textarea v-model="form.user_answer" rows="2"></textarea>
+                    <textarea v-model="form.user_answer" class="auto-grow" rows="1"></textarea>
                 </div>
                 <div class="form-row">
                     <label>解析</label>
-                    <textarea v-model="form.analysis" rows="3"></textarea>
+                    <textarea v-model="form.analysis" class="auto-grow" rows="2"></textarea>
                 </div>
                 <div class="form-row">
                     <label>错误原因</label>
@@ -290,7 +293,6 @@
                 <div class="form-actions">
                     <button class="btn-primary" @click="saveQuestion">保存错题</button>
                     <button class="btn" @click="resetForm">重置</button>
-                    <button class="btn" @click="exitInputMode">返回重选方式</button>
                 </div>
             </div>
         </section>

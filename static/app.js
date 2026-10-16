@@ -2472,6 +2472,32 @@ const UiIcon = {
 const app = createApp(appOptions);
 app.component('app-logo', AppLogo);
 app.component('ui-icon', UiIcon);
+
+// 输入框随内容增高。Chromium 121+ 有 CSS field-sizing: content 可以自动处理，
+// 这里给不支持的浏览器兜底：按 scrollHeight 反向设置高度。
+// 用 MutationObserver 监听 class，因为 Vue 会动态增删 .auto-grow 节点。
+(function setupAutoGrow() {
+    const supported = typeof CSS !== 'undefined' && CSS.supports && CSS.supports('field-sizing', 'content');
+    if (supported) return;
+
+    function resize(el) {
+        el.style.height = 'auto';
+        el.style.height = (el.scrollHeight + 2) + 'px';
+    }
+
+    function bindAll() {
+        document.querySelectorAll('textarea.auto-grow').forEach(el => {
+            if (el.dataset.agBound) return;
+            el.dataset.agBound = '1';
+            resize(el);
+            el.addEventListener('input', () => resize(el));
+        });
+    }
+
+    bindAll();
+    new MutationObserver(bindAll).observe(document.body, { childList: true, subtree: true });
+})();
+
 window.appInstance = app;
 app.mount('#app');
 console.log('错题本前端已加载');

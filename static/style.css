@@ -276,6 +276,19 @@
     background: linear-gradient(135deg, transparent 42%, var(--c-light-band) 42% 49%, transparent 49%);
 }
 
+/* 区块标题行：标题在左，操作按钮（如录入页的「返回」）在右 */
+.section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-4);
+    margin-bottom: var(--space-4);
+}
+
+.section-head h2 {
+    margin: 0;
+}
+
 .section > * {
     position: relative;
     z-index: 1;
@@ -771,6 +784,21 @@
 .ai-content {
     min-height: 88px;
     resize: vertical;
+}
+
+/* 输入框随内容增高：初始一两行，内容多时自动长高，避免大段文字困在小框里。
+   Chromium 121+ 用 field-sizing 自动处理；其余浏览器由 app.js 兜底。
+   必须写在 .form-row textarea 之后，否则 resize/min-height 会被上面的规则盖掉。 */
+.form-row textarea.auto-grow {
+    min-height: 44px;
+    resize: none;
+    overflow-y: hidden;
+}
+
+@supports (field-sizing: content) {
+    .form-row textarea.auto-grow {
+        field-sizing: content;
+    }
 }
 
 .form-row input:hover,
