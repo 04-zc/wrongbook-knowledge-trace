@@ -1,13 +1,14 @@
-const CACHE_NAME = 'wrongbook-shell-v7';
+// 版本号由服务端在响应时注入（见 app.py 的 asset_version），
+// 按 static/ 下文件的最新修改时间生成。任何前端文件一改，版本号自动变，
+// 旧缓存随之失效——不需要再手工同步 index.html 与 sw.js 两处。
+const SHELL_VERSION = '__SHELL_VERSION__';
+const CACHE_NAME = 'wrongbook-shell-' + SHELL_VERSION;
 const META_CACHE = 'wrongbook-sw-meta';
 const META_USER_URL = '/__wrongbook_user_id';
 const USER_CACHE_PREFIX = 'wrongbook-user-';
-// 外壳资源的版本号必须和 index.html 里的 ?v= 完全一致。
-// 之前 install 预缓存的是不带 ?v= 的裸 URL，而 networkFirstStatic 又用
-// ignoreSearch 回查缓存，导致旧版 app.js/style.css 在新版发布后仍被命中，
-// 表现为「界面变回旧样式、登录进不去」。改为缓存真实请求 URL，并且不做
-// 忽略查询串的匹配，让版本号真正起到失效作用。
-const SHELL_VERSION = '20261016apple';
+// 外壳资源的版本号与 index.html 的 ?v= 同源，由服务端注入保证一致。
+// 预缓存必须用带版本号的真实 URL，且离线回查不能 ignoreSearch，
+// 否则旧版 app.js/style.css 会在发版后继续被命中，界面退回旧样式。
 const APP_SHELL = [
     '/',
     '/static/styles/tokens.css?v=' + SHELL_VERSION,
@@ -62,7 +63,7 @@ self.addEventListener('activate', event => {
                         // 外壳缓存只保留当前版本
                         if (key.startsWith('wrongbook-shell-')) return key !== CACHE_NAME;
                         // 每用户缓存只保留当前版本，避免残留过期的接口数据
-                        if (key.startsWith(USER_CACHE_PREFIX)) return !key.endsWith('-v7');
+                        if (key.startsWith(USER_CACHE_PREFIX)) return !key.endsWith('-' + SHELL_VERSION);
                         return false;
                     })
                     .map(key => caches.delete(key))
@@ -141,7 +142,7 @@ async function clearUserCaches() {
 async function getUserCache() {
     const userId = await getCurrentUserId();
     if (!userId) return null;
-    return caches.open(USER_CACHE_PREFIX + userId + '-v7');
+    return caches.open(USER_CACHE_PREFIX + userId + '-' + SHELL_VERSION);
 }
 
 async function networkFirstApi(request, url) {

@@ -720,9 +720,45 @@ def auth_delete_account():
     session.clear()
     return jsonify({'ok': True})
 
+# ---------- 前端资源版本号 ----------
+# index.html 与 sw.js 都需要同一个版本号，此前是两处手写，改一处漏一处就会让
+# Service Worker 继续发旧文件。这里统一由服务端按静态目录的最新修改时间生成，
+# 响应时注入到 ?v= 与 SHELL_VERSION，任何前端文件一改，版本号自动变。
+ASSET_VERSION_CACHE = {'version': None, 'checked_at': 0.0}
+
+
+def asset_version():
+    """返回当前静态资源版本号（最新 mtime 的紧凑时间戳）。"""
+    now = time.time()
+    if ASSET_VERSION_CACHE['version'] and now - ASSET_VERSION_CACHE['checked_at'] < 2:
+        return ASSET_VERSION_CACHE['version']
+    newest = 0.0
+    for root, _dirs, files in os.walk(STATIC_DIR):
+        if 'vendor' in root.replace('\\', '/').split('/'):
+            continue  # vendor 是第三方库，不参与版本计算
+        for name in files:
+            try:
+                mtime = os.path.getmtime(os.path.join(root, name))
+            except OSError:
+                continue
+            if mtime > newest:
+                newest = mtime
+    version = str(int(newest * 1000))
+    ASSET_VERSION_CACHE['version'] = version
+    ASSET_VERSION_CACHE['checked_at'] = now
+    return version
+
+
 @app.route('/')
 def index():
-    return send_from_directory(STATIC_DIR, 'index.html')
+    version = asset_version()
+    with open(os.path.join(STATIC_DIR, 'index.html'), encoding='utf-8') as f:
+        html = f.read()
+    # 模板里写死成 __ASSET_VERSION__，由这里替换成真实版本号
+    html = re.sub(r'\?v=__ASSET_VERSION__', '?v=' + version, html)
+    resp = app.response_class(html, mimetype='text/html; charset=utf-8')
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
 
 @app.route('/manifest.webmanifest')
 def manifest():
@@ -730,7 +766,11 @@ def manifest():
 
 @app.route('/sw.js')
 def service_worker():
-    resp = send_from_directory(STATIC_DIR, 'sw.js', mimetype='application/javascript')
+    version = asset_version()
+    with open(os.path.join(STATIC_DIR, 'sw.js'), encoding='utf-8') as f:
+        js = f.read()
+    js = js.replace('__SHELL_VERSION__', version)
+    resp = app.response_class(js, mimetype='application/javascript')
     resp.headers['Service-Worker-Allowed'] = '/'
     resp.headers['Cache-Control'] = 'no-cache'
     return resp

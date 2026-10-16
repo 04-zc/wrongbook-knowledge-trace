@@ -758,8 +758,6 @@
 .filters input,
 .filters select,
 .batch-toolbar select,
-.weak-kp-add input,
-.weak-kp-add select,
 .resource-grid input,
 .resource-grid select,
 .mind-add input,
@@ -816,8 +814,6 @@
 .filters input:focus,
 .filters select:focus,
 .batch-toolbar select:focus,
-.weak-kp-add input:focus,
-.weak-kp-add select:focus,
 .resource-grid input:focus,
 .resource-grid select:focus,
 .mind-add input:focus,
@@ -1020,6 +1016,12 @@
 .kp-remove:hover {
     color: var(--c-on-brand);
     background: var(--c-danger);
+}
+
+/* 薄弱分析：知识树添加入口，只留一个按钮，表单在弹窗里 */
+.weak-kp-entry {
+    display: flex;
+    margin-bottom: var(--space-4);
 }
 
 /* 表单下方的补充说明，例如删除学科的连带影响 */

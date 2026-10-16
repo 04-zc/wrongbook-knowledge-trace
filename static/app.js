@@ -160,7 +160,7 @@ const appOptions = {
             weakFilter: { subject_id: null },
             weakKpName: '',
             weakParentId: null,
-            weakAddHint: '',
+            showWeakKpModal: false,
             reviewFilter: { subject_id: null },
             reviewAdvice: '',
             reviewKps: [],
@@ -283,6 +283,11 @@ const appOptions = {
         currentWeakSubjectName() {
             const s = this.subjects.find(s => s.id === this.weakFilter.subject_id);
             return s ? s.name : '';
+        },
+        // 弹窗里提示「将作为谁的子知识点」
+        weakParentName() {
+            const k = this.kpTree.find(k => k.id === this.weakParentId);
+            return k ? k.name : '';
         },
         subjectKnowledgePoints() {
             return this.knowledgePoints.filter(k => k.subject_id === this.kpForm.subject_id);
@@ -430,7 +435,26 @@ const appOptions = {
             this.authError = '';
             this.authConfirm = '';
         },
+        // 把 DOM 里的真实输入值同步回 Vue 模型，兼容浏览器自动填充不触发
+        // input 事件的问题。同时把模型值写回输入框，保证界面与模型一致。
+        syncAuthInputs() {
+            const userEl = this.$refs.authUserInput;
+            const passEl = this.$refs.authPassInput;
+            if (userEl && userEl.value !== this.authUsername) {
+                this.authUsername = userEl.value.trim();
+                this.$nextTick(() => { if (userEl) userEl.value = this.authUsername; });
+            }
+            if (passEl && passEl.value !== this.authPassword) {
+                this.authPassword = passEl.value;
+                this.$nextTick(() => { if (passEl) passEl.value = this.authPassword; });
+            }
+            return { username: this.authUsername, password: this.authPassword };
+        },
         async submitAuth() {
+            // Edge / Chrome 的密码管理器自动填充只写 input.value，不触发 input 事件，
+            // Vue 的 v-model 收不到，模型里仍是空字符串——表现就是「明明填好了却登不进去」。
+            // 提交前从 DOM 回读一次真实值，并把回填的结果同步回输入框。
+            this.syncAuthInputs();
             this.authError = '';
             const username = this.authUsername.trim();
             const password = this.authPassword;
@@ -747,7 +771,6 @@ const appOptions = {
             const sid = this.weakFilter.subject_id;
             this.weakPoints = [];
             this.kpTree = [];
-            this.weakAddHint = '';
             if (!sid) return;
             const [weakRes, treeRes, trendRes, priorityRes] = await Promise.all([
                 axios.get('/api/weak_points', { params: { subject_id: sid, top_n: 20 } }),
@@ -1295,14 +1318,24 @@ const appOptions = {
             await this.loadQuestions();
         },
         startChildKp(kp) {
-            this.weakParentId = kp.id;
-            this.weakAddHint = kp.name;
+            this.openWeakKpModal(kp);
+        },
+        // 层级由用户在弹窗里选，默认挂到被点的节点下；不传节点则默认一级
+        openWeakKpModal(parent) {
+            this.weakKpName = '';
+            this.weakParentId = parent ? parent.id : null;
+            this.showWeakKpModal = true;
             this.$nextTick(() => {
-                const input = this.$refs.weakKpInput;
+                const input = this.$refs.weakKpModalInput;
                 if (input) input.focus();
             });
         },
-        async addWeakKp() {
+        closeWeakKpModal() {
+            this.showWeakKpModal = false;
+            this.weakKpName = '';
+            this.weakParentId = null;
+        },
+        async confirmWeakKp() {
             const name = (this.weakKpName || '').trim();
             const sid = this.weakFilter.subject_id;
             if (!name) {
@@ -1320,18 +1353,17 @@ const appOptions = {
                 parent_id: this.weakParentId || null,
                 level: parent ? parent.level + 1 : 0
             });
-            this.weakKpName = '';
-            this.weakParentId = null;
-            this.weakAddHint = '';
+            this.closeWeakKpModal();
             await this.loadWeak();
+        },
+        async addWeakKp() {
+            await this.confirmWeakKp();
         },
         async deleteWeakKp(kp) {
             if (!confirm(`确定删除知识点「${kp.name}」？其下子知识点会一并删除。`)) return;
             await axios.delete(`/api/knowledge_points/${kp.id}`);
-            if (this.weakParentId === kp.id) {
-                this.weakParentId = null;
-                this.weakAddHint = '';
-            }
+            // 弹窗里正选着被删的节点时，层级退回一级
+            if (this.weakParentId === kp.id) this.weakParentId = null;
             await this.loadWeak();
         },
         async loadSettings() {

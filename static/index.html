@@ -12,10 +12,10 @@
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <link rel="icon" href="/static/icons/icon-192.png">
     <title>错题本知识溯源整理助手</title>
-    <link rel="stylesheet" href="/static/styles/tokens.css?v=20261016apple">
-    <link rel="stylesheet" href="/static/styles/base.css?v=20261016apple">
-    <link rel="stylesheet" href="/static/styles/motion.css?v=20261016apple">
-    <link rel="stylesheet" href="/static/style.css?v=20261016apple">
+    <link rel="stylesheet" href="/static/styles/tokens.css?v=__ASSET_VERSION__">
+    <link rel="stylesheet" href="/static/styles/base.css?v=__ASSET_VERSION__">
+    <link rel="stylesheet" href="/static/styles/motion.css?v=__ASSET_VERSION__">
+    <link rel="stylesheet" href="/static/style.css?v=__ASSET_VERSION__">
     <script src="/static/vue.global.js"></script>
     <script src="/static/axios.min.js"></script>
     <link rel="stylesheet" href="/static/vendor/katex/katex.min.css">
@@ -46,11 +46,11 @@
                 <form class="auth-form" @submit.prevent="submitAuth">
                     <label class="field">
                         <span>账号</span>
-                        <input v-model.trim="authUsername" type="text" placeholder="英文或数字" autocomplete="username">
+                        <input ref="authUserInput" v-model.trim="authUsername" type="text" placeholder="英文或数字" autocomplete="username">
                     </label>
                     <label class="field">
                         <span>密码</span>
-                        <input v-model="authPassword" type="password" placeholder="英文或数字" autocomplete="current-password">
+                        <input ref="authPassInput" v-model="authPassword" type="password" placeholder="英文或数字" autocomplete="current-password">
                     </label>
                     <label class="field" v-if="authMode === 'register'">
                         <span>确认密码</span>
@@ -437,17 +437,13 @@
                 </div>
             </div>
             <h3 class="section-gap">搭建 {{ currentWeakSubjectName || '当前学科' }} 知识树</h3>
-            <div class="weak-kp-add">
-                <input type="text" v-model="weakKpName" @keyup.enter="addWeakKp" placeholder="新知识点名称，如：三角函数" ref="weakKpInput">
-                <select v-model.number="weakParentId">
-                    <option :value="null">作为一级知识点</option>
-                    <option v-for="k in kpTree" :key="k.id" :value="k.id">{{ '　'.repeat(k.level) }}{{ k.name }}</option>
-                </select>
-                <button class="btn-primary" @click="addWeakKp">添加</button>
+            <div class="weak-kp-entry">
+                <button type="button" class="btn-primary" @click="openWeakKpModal" :disabled="!weakFilter.subject_id">
+                    <ui-icon name="plus"></ui-icon><span>添加知识点</span>
+                </button>
             </div>
-            <p v-if="weakAddHint" class="add-hint">将添加为「{{ weakAddHint }}」的子知识点</p>
             <div v-if="!kpTree.length" class="empty-tip">
-                当前学科还没有知识点，在上方输入名称并点击「添加」，先建出一级知识点。
+                当前学科还没有知识点，点「添加知识点」先建出一级知识点。
             </div>
             <div class="kp-tree" v-else>
                 <div v-for="n in kpTree" :key="n.id" class="tree-branch" :class="{'tree-root': n.level===0}">
@@ -1011,6 +1007,32 @@
         </div>
     </div>
 
+    <!-- 薄弱分析：添加知识点 -->
+    <div class="modal" v-if="showWeakKpModal" @click.self="closeWeakKpModal">
+        <div class="modal-body modal-narrow">
+            <h3>添加知识点</h3>
+            <div class="form-row">
+                <label>名称</label>
+                <input type="text" ref="weakKpModalInput" v-model.trim="weakKpName" placeholder="例如：三角函数" @keyup.enter="confirmWeakKp">
+            </div>
+            <div class="form-row">
+                <label>层级</label>
+                <select v-model.number="weakParentId">
+                    <option :value="null">一级知识点</option>
+                    <option v-for="k in kpTree" :key="k.id" :value="k.id">
+                        {{ '　'.repeat(k.level) }}{{ k.name }}（{{ k.level + 1 }} 级）
+                    </option>
+                </select>
+                <p class="add-hint" v-if="weakParentId">将作为「{{ weakParentName }}」的子知识点</p>
+                <p class="add-hint" v-else>将作为「{{ currentWeakSubjectName }}」下的一级知识点</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" @click="confirmWeakKp" :disabled="!weakKpName">添加</button>
+                <button class="btn" @click="closeWeakKpModal">取消</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 新增学科 -->
     <div class="modal" v-if="showAddSubjectModal" @click.self="showAddSubjectModal=false">
         <div class="modal-body modal-narrow">
@@ -1463,6 +1485,6 @@
     </div>
     </template>
 </div>
-    <script src="/static/app.js?v=20261016apple"></script>
+    <script src="/static/app.js?v=__ASSET_VERSION__"></script>
 </body>
 </html>
