@@ -529,6 +529,7 @@
 .btn-primary,
 .btn-sm,
 .btn-danger,
+.btn-ai,
 .mini-btn,
 .upload-btn,
 .switch-user-btn,
@@ -846,6 +847,33 @@
     flex-wrap: wrap;
     gap: var(--space-3);
     margin-top: var(--space-6);
+}
+
+/* 弹窗内的操作按钮行：间距统一，让主按钮与次按钮视觉重量一致，
+   不会出现一个粗一个细、挤在一起的观感。 */
+.action-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+}
+
+/* 类型下拉 + AI 推荐按钮并排，按钮宽度与下拉齐平，符合点击习惯 */
+.inline-add-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.inline-add-row .material-type-select {
+    flex: 1 1 220px;
+    min-width: 0;
+}
+
+.inline-add-row .btn-ai {
+    flex: 0 0 auto;
 }
 
 .upload-actions {
@@ -2291,6 +2319,8 @@
 
 .review-ai-content,
 .ai-content {
+    width: 100%;
+    box-sizing: border-box;
     padding: var(--space-3);
     overflow-y: auto;
     font-family: var(--font-sans);
@@ -2299,6 +2329,15 @@
     background: var(--c-surface-muted);
     border: 1px solid var(--c-border);
     border-radius: var(--r-md);
+}
+
+/* textarea 形态的 .ai-content：文本域默认宽度约 20 列，
+   不显式撑满就会只占弹窗一半，看起来很不协调。 */
+textarea.ai-content {
+    display: block;
+    min-height: 96px;
+    resize: none;
+    overflow-y: hidden;
 }
 
 .plan-head {
@@ -2466,11 +2505,22 @@
     margin: 0 0 var(--space-3);
 }
 
+/* 资源表单：用 flex 让剩下的输入框自动铺满整行，
+   避免字段少时（例如「笔记」只有类型+标题）右边空出一半，看起来不协调。 */
 .resource-grid {
-    display: grid;
-    grid-template-columns: 140px minmax(0, 1fr) 120px minmax(0, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--space-2);
     margin-top: var(--space-2);
+}
+
+.resource-grid select {
+    flex: 0 1 148px;
+}
+
+.resource-grid input {
+    flex: 1 1 200px;
+    min-width: 0;
 }
 
 .ai-resource-list {

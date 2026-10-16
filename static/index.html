@@ -1299,15 +1299,20 @@
             <div class="detail-panel" v-show="graphDetail.tab==='overview'">
                 <div class="trace-block">
                     <label>知识点说明</label>
-                    <textarea v-model="graphDetail.description" rows="6" class="ai-content" placeholder="可以自己编辑知识点说明"></textarea>
-                    <div class="review-detail-actions" style="margin-top:8px">
+                    <textarea v-model="graphDetail.description" rows="5" class="ai-content" placeholder="可以自己编辑知识点说明"></textarea>
+                    <div class="action-row">
                         <button type="button" class="btn-primary" @click="saveGraphDescription">保存说明</button>
-                        <button type="button" class="btn-primary" @click="generateGraphSummary" :disabled="graphDetail.aiLoading">{{ graphDetail.aiLoading ? 'AI 整理中...' : 'AI 精简知识点' }}</button>
-                        <button type="button" class="btn" v-if="graphDetail.aiContent" @click="saveGraphSummary">保存到知识库</button>
-                        <button type="button" class="btn" v-if="graphDetail.aiContent" @click="applyGraphSummaryAsDescription">设为说明</button>
+                        <button type="button" class="btn-ai" @click="generateGraphSummary" :disabled="graphDetail.aiLoading">{{ graphDetail.aiLoading ? 'AI 整理中...' : 'AI 精简知识点' }}</button>
+                        <template v-if="graphDetail.aiContent">
+                            <button type="button" class="btn" @click="saveGraphSummary">保存到知识库</button>
+                            <button type="button" class="btn" @click="applyGraphSummaryAsDescription">设为说明</button>
+                        </template>
                     </div>
                 </div>
-                <textarea v-if="graphDetail.aiContent" v-model="graphDetail.aiContent" rows="10" class="ai-content"></textarea>
+                <div class="trace-block" v-if="graphDetail.aiContent">
+                    <label>AI 精简结果</label>
+                    <textarea v-model="graphDetail.aiContent" rows="8" class="ai-content"></textarea>
+                </div>
             </div>
             <div class="detail-panel" v-show="graphDetail.tab==='knowledge'">
                 <div v-if="graphDetail.materials.length" class="trace-block">
@@ -1315,7 +1320,7 @@
                     <details v-for="m in graphDetail.materials" :key="m.id" class="typical-item">
                         <summary>{{ m.type === 'summary' ? '知识点精要' : m.type }}</summary>
                         <textarea v-model="m.content" rows="8" class="ai-content" style="margin-top:8px"></textarea>
-                        <div class="review-detail-actions" style="margin-top:8px">
+                        <div class="action-row">
                             <button type="button" class="btn-primary" @click="saveMaterialEdit(m)">保存修改</button>
                             <button type="button" class="btn btn-danger" @click="deleteMaterial(m, 'graphDetail')">删除</button>
                         </div>
@@ -1323,35 +1328,30 @@
                 </div>
                 <div class="trace-block">
                     <label>新增知识库内容</label>
-                    <select v-model="graphDetail.newType" class="material-type-select">
-                        <option value="custom">自定义内容</option>
-                        <option value="summary">知识点精要</option>
-                        <option value="concept">概念回顾</option>
-                        <option value="typical">典型例题</option>
-                        <option value="variant">变式练习</option>
-                    </select>
-                    <textarea v-model="graphDetail.newContent" rows="6" class="ai-content" style="margin-top:8px"></textarea>
-                    <div class="review-detail-actions" style="margin-top:8px">
-                        <button type="button" class="btn-primary" @click="createMaterial('graphDetail')">新增内容</button>
+                    <div class="inline-add-row">
+                        <select v-model="graphDetail.newType" class="material-type-select">
+                            <option value="custom">自定义内容</option>
+                            <option value="summary">知识点精要</option>
+                            <option value="concept">概念回顾</option>
+                            <option value="typical">典型例题</option>
+                            <option value="variant">变式练习</option>
+                        </select>
+                        <button type="button" class="btn-ai" @click="generateMaterialDraft('graphDetail')" :disabled="graphDetail.aiDraftLoading">
+                            {{ graphDetail.aiDraftLoading ? '生成中...' : 'AI 推荐' }}
+                        </button>
                     </div>
+                    <textarea v-model="graphDetail.newContent" rows="6" class="ai-content" style="margin-top:8px" placeholder="可以自己整理知识点内容、例题、笔记等"></textarea>
+                    <div class="action-row">
+                        <button type="button" class="btn-primary" @click="createMaterial('graphDetail')">新增内容</button>
+                        <button type="button" class="btn" v-if="graphDetail.aiDraftContent" @click="applyMaterialDraft('graphDetail')">用 AI 结果填充</button>
+                    </div>
+                    <p class="add-hint" v-if="graphDetail.aiDraftContent">AI 已生成精简草稿，点「用 AI 结果填充」写入上方输入框。</p>
                 </div>
             </div>
             <div class="detail-panel" v-show="graphDetail.tab==='resources'">
                 <div class="resource-section">
-                    <h4>AI 推荐</h4>
-                    <button type="button" class="btn-primary" @click="generateAiResources" :disabled="graphDetail.aiResourcesLoading">{{ graphDetail.aiResourcesLoading ? '推荐中...' : 'AI 推荐学习资源' }}</button>
-                    <div class="ai-resource-list" v-if="graphDetail.aiResources.length">
-                        <div v-for="(item, idx) in graphDetail.aiResources" :key="idx" class="ai-resource-card">
-                            <strong>{{ item.title }}</strong>
-                            <a v-if="item.type==='course' && item.url" :href="item.url" target="_blank">打开 B站搜索</a>
-                            <p v-if="item.content">{{ item.content }}</p>
-                            <button type="button" class="mini-btn" @click="saveAiResource(item)">保存到学习资源</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="resource-section">
                     <h4>我的学习资源</h4>
-                    <p v-if="!graphDetail.resources.length" class="empty-tip">还没有学习资源，可以自己添加或使用 AI 推荐。</p>
+                    <p v-if="!graphDetail.resources.length" class="empty-tip">还没有学习资源，可以在下方新增，或先用 AI 推荐。</p>
                     <details v-for="r in graphDetail.resources" :key="r.id" class="typical-item">
                         <summary>{{ r.type === 'textbook' ? '教材' : r.type === 'course' ? '网课' : '笔记' }} · {{ r.title || '未命名' }}</summary>
                         <div class="resource-grid">
@@ -1366,11 +1366,12 @@
                         </div>
                         <textarea v-model="r.content" rows="3" class="ai-content" style="margin-top:8px"></textarea>
                         <p v-if="r.attachment" class="typical-source">附件：<a :href="r.attachment" target="_blank">打开附件</a></p>
-                        <div class="review-detail-actions" style="margin-top:8px">
+                        <div class="action-row">
                             <button type="button" class="btn-primary" @click="saveResource(r)">保存修改</button>
                             <button type="button" class="btn btn-danger" @click="deleteResource(r)">删除</button>
                         </div>
                     </details>
+
                     <h4 class="section-gap">新增我的资源</h4>
                     <div class="resource-grid">
                         <select v-model="graphDetail.resourceForm.type">
@@ -1382,11 +1383,23 @@
                         <input v-if="graphDetail.resourceForm.type==='textbook'" v-model="graphDetail.resourceForm.page" placeholder="教材页码">
                         <input v-if="graphDetail.resourceForm.type==='course'" v-model="graphDetail.resourceForm.url" placeholder="链接">
                     </div>
-                    <textarea v-model="graphDetail.resourceForm.content" rows="3" class="ai-content" style="margin-top:8px" placeholder="笔记内容"></textarea>
-                    <div class="review-detail-actions" style="margin-top:8px">
+                    <textarea v-model="graphDetail.resourceForm.content" rows="4" class="ai-content" style="margin-top:8px" placeholder="笔记内容"></textarea>
+                    <div class="action-row">
                         <label class="btn" style="cursor:pointer">上传附件<input type="file" hidden @change="uploadResourceAttachment"></label>
                         <span class="typical-source" v-if="graphDetail.resourceForm.attachment">已上传附件</span>
+                        <button type="button" class="btn-ai" @click="generateAiResources" :disabled="graphDetail.aiResourcesLoading">
+                            {{ graphDetail.aiResourcesLoading ? '推荐中...' : 'AI 推荐' }}
+                        </button>
                         <button type="button" class="btn-primary" @click="saveResource()">新增资源</button>
+                    </div>
+                    <div class="ai-resource-list" v-if="graphDetail.aiResources.length">
+                        <div v-for="(item, idx) in graphDetail.aiResources" :key="idx" class="ai-resource-card">
+                            <strong>{{ item.title }}</strong>
+                            <a v-if="item.type==='course' && item.url" :href="item.url" target="_blank">打开 B站搜索</a>
+                            <p v-if="item.content">{{ item.content }}</p>
+                            <button type="button" class="mini-btn" @click="useAiResource(item)">填入表单</button>
+                            <button type="button" class="mini-btn" @click="saveAiResource(item)">保存到学习资源</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1410,7 +1423,7 @@
                 <details v-for="m in kpDetail.materials" :key="m.id" class="typical-item">
                     <summary>{{ m.type === 'concept' ? '概念回顾' : m.type === 'variant' ? '变式练习' : m.type === 'typical' ? '典型例题' : 'AI 内容' }} · {{ (m.created_at || '').slice(0, 10) }}</summary>
                     <textarea v-model="m.content" rows="8" class="ai-content" style="margin-top:8px"></textarea>
-                    <div class="review-detail-actions" style="margin-top:8px">
+                    <div class="action-row">
                         <button type="button" class="btn-primary" @click="saveMaterialEdit(m)">保存修改</button>
                         <button type="button" class="btn btn-danger" @click="deleteMaterial(m, 'kpDetail')">删除</button>
                     </div>
@@ -1418,17 +1431,24 @@
             </div>
             <div class="trace-block">
                 <label>新增知识库内容</label>
-                <select v-model="kpDetail.newType" class="material-type-select">
-                    <option value="custom">自定义内容</option>
-                    <option value="summary">知识点精要</option>
-                    <option value="concept">概念回顾</option>
-                    <option value="typical">典型例题</option>
-                    <option value="variant">变式练习</option>
-                </select>
-                <textarea v-model="kpDetail.newContent" rows="5" class="ai-content" style="margin-top:8px" placeholder="可以自己整理知识点内容、例题、笔记等"></textarea>
-                <div class="review-detail-actions" style="margin-top:8px">
-                    <button type="button" class="btn-primary" @click="createMaterial('kpDetail')">新增内容</button>
+                <div class="inline-add-row">
+                    <select v-model="kpDetail.newType" class="material-type-select">
+                        <option value="custom">自定义内容</option>
+                        <option value="summary">知识点精要</option>
+                        <option value="concept">概念回顾</option>
+                        <option value="typical">典型例题</option>
+                        <option value="variant">变式练习</option>
+                    </select>
+                    <button type="button" class="btn-ai" @click="generateMaterialDraft('kpDetail')" :disabled="kpDetail.aiDraftLoading">
+                        {{ kpDetail.aiDraftLoading ? '生成中...' : 'AI 推荐' }}
+                    </button>
                 </div>
+                <textarea v-model="kpDetail.newContent" rows="6" class="ai-content" style="margin-top:8px" placeholder="可以自己整理知识点内容、例题、笔记等"></textarea>
+                <div class="action-row">
+                    <button type="button" class="btn-primary" @click="createMaterial('kpDetail')">新增内容</button>
+                    <button type="button" class="btn" v-if="kpDetail.aiDraftContent" @click="applyMaterialDraft('kpDetail')">用 AI 结果填充</button>
+                </div>
+                <p class="add-hint" v-if="kpDetail.aiDraftContent">AI 已生成精简草稿，点「用 AI 结果填充」写入上方输入框。</p>
             </div>
             <div class="modal-actions">
                 <button class="btn" @click="kpDetail.show=false">关闭</button>

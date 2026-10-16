@@ -195,7 +195,9 @@ const appOptions = {
                 resourceForm: { type: 'textbook', title: '', url: '', page: '', content: '', attachment: '' },
                 tab: 'overview',
                 aiResources: [],
-                aiResourcesLoading: false
+                aiResourcesLoading: false,
+                aiDraftContent: '',
+                aiDraftLoading: false
             },
             kpForm: { subject_id: null, parent_id: null, name: '' },
             settingsKpHint: '',
@@ -229,7 +231,7 @@ const appOptions = {
             typicalAiLoading: false,
             traceModal: { show: false, loading: false, saving: false, data: null },
             mindMapModal: { show: false, map: null, question: null, newLabel: '', newType: 'direct' },
-            kpDetail: { show: false, kp: null, path: '', materials: [] },
+            kpDetail: { show: false, kp: null, path: '', materials: [], newType: 'custom', newContent: '', aiDraftContent: '', aiDraftLoading: false },
             cameraActive: false,
             cameraError: '',
             cameraStream: null
@@ -1102,7 +1104,9 @@ const appOptions = {
                 resourceForm: { type: 'textbook', title: '', url: '', page: '', content: '', attachment: '' },
                 tab: 'overview',
                 aiResources: [],
-                aiResourcesLoading: false
+                aiResourcesLoading: false,
+                aiDraftContent: '',
+                aiDraftLoading: false
             };
             try {
                 const res = await axios.get('/api/ai/materials', { params: { kp_id: kp.id } });
@@ -1146,8 +1150,38 @@ const appOptions = {
             await axios.post(`/api/ai/materials/${m.id}`, { content: m.content });
             alert('已保存修改');
         },
-        async createMaterial(containerKey) {
+        // 新增知识库内容里的「AI 推荐」：按当前选中的类型生成一份精简草稿，
+        // 先放进 aiDraftContent，由用户点「用 AI 结果填充」再写入输入框，
+        // 避免直接覆盖用户已经手打的内容。
+        async generateMaterialDraft(containerKey) {
+            if (!this.ensureApiKey()) return;
             const c = this[containerKey];
+            const type = c.newType || 'custom';
+            // 自定义内容没有固定的生成模板，退化成知识点精要草稿
+            const mode = type === 'custom' ? 'summary' : type;
+            c.aiDraftLoading = true;
+            c.aiDraftContent = '';
+            try {
+                const res = await axios.post('/api/ai/generate', {
+                    kp_id: c.kp.id,
+                    mode
+                });
+                c.aiDraftContent = res.data.content || '';
+                if (!c.aiDraftContent) {
+                    alert('AI 没有返回内容，请稍后重试');
+                }
+            } catch (err) {
+                alert((err.response && err.response.data && err.response.data.error) || 'AI 推荐失败');
+            } finally {
+                c.aiDraftLoading = false;
+            }
+        },
+        applyMaterialDraft(containerKey) {
+            const c = this[containerKey];
+            if (!c.aiDraftContent) return;
+            c.newContent = c.aiDraftContent;
+        },
+        async createMaterial(containerKey) {            const c = this[containerKey];
             const content = (c.newContent || '').trim();
             if (!content) {
                 alert('请输入内容');
@@ -1242,6 +1276,17 @@ const appOptions = {
             } finally {
                 this.graphDetail.aiResourcesLoading = false;
             }
+        },
+        // 把 AI 推荐的一条结果填进「新增我的资源」表单，用户可以改完再保存
+        useAiResource(item) {
+            this.graphDetail.resourceForm = {
+                type: item.type === 'course' ? 'course' : 'note',
+                title: item.title || '',
+                url: item.url || '',
+                page: '',
+                content: item.content || '',
+                attachment: ''
+            };
         },
         async saveAiResource(item) {
             if (!confirm('确认把这条 AI 推荐保存到学习资源？')) return;
@@ -2302,7 +2347,9 @@ const appOptions = {
                 path: names.join(' > '),
                 materials: [],
                 newType: 'custom',
-                newContent: ''
+                newContent: '',
+                aiDraftContent: '',
+                aiDraftLoading: false
             };
             try {
                 const res = await axios.get('/api/ai/materials', { params: { kp_id: kp.id } });
