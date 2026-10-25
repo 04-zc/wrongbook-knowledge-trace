@@ -1155,15 +1155,31 @@ def add_kp_feedback(question_id, kp_id, action):
     session.close()
     return True
 
+# 反馈修正的强度上限。用户确认/否认只作为「先验偏置」参与置信度，
+# 不能单独把一条低分推荐抬过自动绑定阈值，因此封顶 ±0.15。
+FEEDBACK_MAX_BOOST = 0.15
+# tanh 的缩放因子：约 3 次一致反馈达到 76% 的饱和值，
+# 之后继续增加只产生很小的边际增量，避免刷分线性拉满。
+FEEDBACK_SATURATION = 3.0
+
+
 def feedback_boost_map(subject_id=None):
+    """把用户的确认/否认历史换算成置信度偏置（-0.15 ~ +0.15）。
+
+    采用 tanh 饱和曲线而非线性累加：早期反馈影响明显，
+    多次重复反馈的边际效果递减，避免靠反复确认把分数刷到上限。
+    """
     uid = current_user_id()
     session = get_session()
     q = select(KpFeedback.kp_id, KpFeedback.action).where(KpFeedback.user_id == uid)
-    boost = {}
+    net = {}
     for kp_id, action in session.execute(q).all():
-        boost[kp_id] = boost.get(kp_id, 0) + (1 if action == 'confirm' else -1)
+        net[kp_id] = net.get(kp_id, 0) + (1 if action == 'confirm' else -1)
     session.close()
-    return {kid: max(-0.2, min(0.2, count * 0.05)) for kid, count in boost.items()}
+    return {
+        kid: round(FEEDBACK_MAX_BOOST * math.tanh(count / FEEDBACK_SATURATION), 3)
+        for kid, count in net.items()
+    }
 
 # ---------- learning resources ----------
 def list_learning_resources(kp_id):

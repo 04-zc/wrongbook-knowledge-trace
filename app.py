@@ -331,18 +331,58 @@ def extract_text_for_ai(q):
             parts.append(q[k])
     return '\n'.join(parts)
 
+# ---- 本地规则推荐的置信度权重 ----
+# 直接命中知识点全名：基础分 + 覆盖度加成
+LOCAL_DIRECT_BASE = 0.60
+LOCAL_DIRECT_COVERAGE_W = 0.30
+# 关键词映射命中父级知识点
+LOCAL_KEYWORD_BASE = 0.55
+LOCAL_KEYWORD_COVERAGE_W = 0.20
+# 名字越长越具体，越可信（短名如「函数」容易误命中）
+LOCAL_SPECIFICITY_W = 0.10
+# 层级越深越具体，给一点点加成
+LOCAL_DEPTH_W = 0.02
+LOCAL_DEPTH_CAP = 3
+
+
+def _coverage_ratio(text, needle):
+    """needle 在 text 中的字符占比，用来衡量这个知识点在题目里的「存在感」。"""
+    if not text or not needle:
+        return 0.0
+    return min(1.0, len(needle) / max(len(text), 1))
+
+
+def _specificity(kp):
+    """知识点名称的具体程度：名字越长越不容易误命中，归一化到 0~1。"""
+    return min(1.0, len(kp.get('name') or '') / 8.0)
+
+
 def local_recommend(text, subject_id):
+    """无大模型时的本地规则推荐。
+
+    置信度不再用写死的常量，而是按「匹配覆盖度 + 名称具体度 + 层级深度」
+    加权计算：命中越具体、占比越高的知识点得分越高。
+    """
+    text = text or ''
     kps = db.list_kps(subject_id)
     matches = []
     for kp in kps:
-        if kp['name'] in text:
-            matches.append({
-                'id': kp['id'],
-                'path': kp['name'],
-                'name': kp['name'],
-                'confidence': 0.85,
-                'is_auto': 1
-            })
+        name = kp.get('name') or ''
+        if not name or name not in text:
+            continue
+        score = (
+            LOCAL_DIRECT_BASE
+            + LOCAL_DIRECT_COVERAGE_W * _coverage_ratio(text, name)
+            + LOCAL_SPECIFICITY_W * _specificity(kp)
+            + LOCAL_DEPTH_W * min(kp.get('level', 0), LOCAL_DEPTH_CAP)
+        )
+        matches.append({
+            'id': kp['id'],
+            'path': kp['name'],
+            'name': kp['name'],
+            'confidence': round(min(1.0, score), 3),
+            'is_auto': 1
+        })
     keyword_map = {
         '诱导公式': '三角函数',
         '三角函数': '三角函数',
@@ -354,17 +394,30 @@ def local_recommend(text, subject_id):
         '导数': '函数',
         '积分': '函数'
     }
+    # 关键词映射：命中子概念时关联到父级知识点，得分低于直接命中
     for kw, parent in keyword_map.items():
-        if kw in text:
-            for kp in kps:
-                if kp['name'] == parent and not any(m['id'] == kp['id'] for m in matches):
-                    matches.append({
-                        'id': kp['id'],
-                        'path': kp['name'],
-                        'name': kp['name'],
-                        'confidence': 0.75,
-                        'is_auto': 1
-                    })
+        if kw not in text:
+            continue
+        for kp in kps:
+            if kp.get('name') != parent:
+                continue
+            if any(m['id'] == kp['id'] for m in matches):
+                continue
+            score = (
+                LOCAL_KEYWORD_BASE
+                + LOCAL_KEYWORD_COVERAGE_W * _coverage_ratio(text, kw)
+                + LOCAL_SPECIFICITY_W * _specificity(kp)
+                + LOCAL_DEPTH_W * min(kp.get('level', 0), LOCAL_DEPTH_CAP)
+            )
+            matches.append({
+                'id': kp['id'],
+                'path': kp['name'],
+                'name': kp['name'],
+                'confidence': round(min(1.0, score), 3),
+                'is_auto': 1
+            })
+    # 置信度高的排前面，保证「最多 3 个」截断时留下的是最可信的
+    matches.sort(key=lambda m: m['confidence'], reverse=True)
     return matches[:3]
 
 def call_llm(prompt, json_mode=False):
@@ -436,16 +489,33 @@ def call_llm_stream(prompt):
             logger.debug('跳过无法解析的流式分片: %s', e)
             continue
 
+def _read_threshold(key, default):
+    """读取阈值设置，非法值或越界时回退到默认值。
+
+    阈值来自用户可编辑的设置，若被写成负数或 >1，会让所有推荐都被
+    判成 auto 或 ignored，这里做一次兜底避免算法整体失效。
+    """
+    try:
+        value = float(db.get_setting(key, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+    if not (0.0 <= value <= 1.0):
+        return default
+    return value
+
+
 def classify_recommendations(recs):
+    """按置信度把推荐分成 auto / pending / ignored 三档。
+
+    最终置信度 = 模型或规则给出的原始分 + 用户历史反馈偏置（±0.15），
+    再截断到 0~1。反馈只做偏置，不足以单独把低分推荐推过 auto 阈值。
+    """
     boost = db.feedback_boost_map()
-    try:
-        auto_th = float(db.get_setting('kp_auto_threshold', '0.8') or 0.8)
-    except (TypeError, ValueError):
-        auto_th = 0.8
-    try:
-        pending_th = float(db.get_setting('kp_pending_threshold', '0.5') or 0.5)
-    except (TypeError, ValueError):
-        pending_th = 0.5
+    auto_th = _read_threshold('kp_auto_threshold', 0.8)
+    pending_th = _read_threshold('kp_pending_threshold', 0.5)
+    # 保证 pending 必须低于 auto，否则两档会重叠或倒挂
+    if pending_th >= auto_th:
+        pending_th = max(0.0, auto_th - 0.1)
     result = []
     for rec in recs:
         item = dict(rec)
@@ -489,15 +559,28 @@ path 中每一级都只写精简名称（12 个字以内），不要写解释。
                 if kp['name'] == name:
                     matched = kp
                     break
+            created_new = False
             if not matched and name:
                 matched = db.add_kp(subject_id, name, description=f'来自AI推荐: {path}')
                 kps.append(matched)
+                created_new = True
             if matched:
+                # LLM 返回的置信度不可直接信任：可能是字符串、越界值或缺失，
+                # 这里统一归一化到 0~1，并对「新建的知识点」轻微降权，
+                # 因为它是模型臆造出来、库里原本不存在的概念。
+                raw_conf = item.get('confidence', 0.8)
+                try:
+                    conf = float(raw_conf)
+                except (TypeError, ValueError):
+                    conf = 0.8
+                conf = min(1.0, max(0.0, conf))
+                if created_new:
+                    conf = round(conf * 0.9, 3)
                 result.append({
                     'id': matched['id'],
                     'path': path,
                     'name': matched['name'],
-                    'confidence': item.get('confidence', 0.8),
+                    'confidence': conf,
                     'is_auto': 1
                 })
         return classify_recommendations(result)
