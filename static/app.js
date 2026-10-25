@@ -105,6 +105,12 @@ const appOptions = {
             pendingDeleteQuestionCount: 0,
             deletingSubject: false,
             showKpManager: false,
+            // 孤儿图片清理
+            orphanList: [],
+            orphanScanning: false,
+            orphanScanned: false,
+            orphanCleaning: false,
+            orphanSizeText: '',
             authUser: null,
             authMode: 'login',
             authUsername: '',
@@ -557,6 +563,42 @@ const appOptions = {
                 await this.switchUser();
             } catch (e) {
                 alert((e.response && e.response.data && e.response.data.error) || '修改失败');
+            }
+        },
+        // ---- 孤儿图片清理：先扫描预览，用户确认后才删除 ----
+        async scanOrphanUploads() {
+            this.orphanScanning = true;
+            this.orphanScanned = false;
+            try {
+                const res = await axios.get('/api/uploads/orphans');
+                this.orphanList = res.data.orphans || [];
+                this.orphanSizeText = res.data.readable_size || '0 B';
+                this.orphanScanned = true;
+                if (!this.orphanList.length) {
+                    alert('没有发现可清理的图片。');
+                }
+            } catch (e) {
+                alert((e.response && e.response.data && e.response.data.error) || '扫描失败');
+            } finally {
+                this.orphanScanning = false;
+            }
+        },
+        async cleanOrphanUploads() {
+            if (!this.orphanList.length) return;
+            const n = this.orphanList.length;
+            if (!confirm('确认删除这 ' + n + ' 个未被引用的图片？\n\n删除后无法恢复，但不影响任何错题和学习资源。')) return;
+            this.orphanCleaning = true;
+            try {
+                const paths = this.orphanList.map(f => f.path);
+                const res = await axios.post('/api/uploads/orphans', { paths });
+                const d = res.data || {};
+                alert('已清理 ' + (d.deleted_count || 0) + ' 个文件，释放 ' + (d.readable_size || '0 B') +
+                      (d.skipped_count ? ('\n有 ' + d.skipped_count + ' 个文件因仍被引用而跳过。') : ''));
+                await this.scanOrphanUploads();
+            } catch (e) {
+                alert((e.response && e.response.data && e.response.data.error) || '清理失败');
+            } finally {
+                this.orphanCleaning = false;
             }
         },
         async deleteAccount() {

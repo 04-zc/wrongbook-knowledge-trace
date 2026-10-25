@@ -1052,6 +1052,24 @@
     margin-bottom: var(--space-4);
 }
 
+/* 孤儿图片清理：文件列表 */
+.orphan-list {
+    margin-top: var(--space-3);
+}
+
+.orphan-items {
+    max-height: 200px;
+    padding-left: var(--space-5);
+    margin: var(--space-2) 0 0;
+    overflow-y: auto;
+    font-size: var(--fs-xs);
+    line-height: 1.9;
+}
+
+.orphan-items li {
+    word-break: break-all;
+}
+
 /* 表单下方的补充说明，例如删除学科的连带影响 */
 .form-hint {
     margin: var(--space-2) 0 0;

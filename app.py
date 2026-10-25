@@ -1896,6 +1896,53 @@ def api_upload_image():
     _path, url = _store_upload(file, ext, 'upload')
     return jsonify({'url': url, 'filename': os.path.basename(url)})
 
+# ---------- 孤儿图片清理 ----------
+# 两步式：先扫描预览，用户确认后再提交要删的路径。
+# 删除接口只接受扫描结果里的相对路径，并且服务端会重新校验一次，
+# 防止前端传入构造路径删掉别的东西。
+@app.route('/api/uploads/orphans', methods=['GET'])
+def api_list_orphan_uploads():
+    uid = session.get('user_id')
+    orphans = db.list_orphan_uploads(user_id=uid)
+    total = sum(o['size'] for o in orphans)
+    return jsonify({
+        'orphans': orphans,
+        'count': len(orphans),
+        'bytes': total,
+        'readable_size': _human_size(total)
+    })
+
+@app.route('/api/uploads/orphans', methods=['POST'])
+def api_delete_orphan_uploads():
+    uid = session.get('user_id')
+    body = request.get_json(force=True, silent=True) or {}
+    paths = body.get('paths')
+    if not isinstance(paths, list) or not paths:
+        return jsonify({'error': '请先扫描并选择要清理的文件'}), 400
+    # 单次上限，避免一个请求删掉海量文件导致长时间阻塞
+    if len(paths) > 500:
+        return jsonify({'error': '单次最多清理 500 个文件，请分批进行'}), 400
+    deleted, skipped, freed = db.delete_orphan_uploads(paths, user_id=uid)
+    logger.info('清理孤儿上传文件: 删除 %d 个, 跳过 %d 个, 释放 %d 字节',
+                len(deleted), len(skipped), freed)
+    return jsonify({
+        'deleted': deleted,
+        'skipped': skipped,
+        'deleted_count': len(deleted),
+        'skipped_count': len(skipped),
+        'freed_bytes': freed,
+        'readable_size': _human_size(freed)
+    })
+
+def _human_size(num):
+    """把字节数转成便于阅读的单位。"""
+    value = float(num or 0)
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if value < 1024 or unit == 'GB':
+            return f'{value:.1f} {unit}' if unit != 'B' else f'{int(value)} B'
+        value /= 1024
+    return f'{value:.1f} GB'
+
 def ocr_image(image_path):
     ocr = get_ocr()
     # PaddleOCR 2.x 用 ocr()，3.x 用 predict()

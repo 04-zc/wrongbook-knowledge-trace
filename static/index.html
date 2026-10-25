@@ -748,6 +748,34 @@
                 <a class="btn" href="/api/backup/export">导出数据包</a>
                 <label class="btn" style="cursor:pointer">导入数据包<input type="file" accept=".zip,.json,.db,.sqlite,.sqlite3" hidden @change="importBackupPackage"></label>
             </div>
+            <h4 class="section-gap">存储空间清理</h4>
+            <p class="form-hint">拍照上传的图片会保存在本地。清理会删除那些已经没有任何错题或学习资源引用的图片。</p>
+            <div class="review-detail-actions">
+                <button type="button" class="btn" @click="scanOrphanUploads" :disabled="orphanScanning">
+                    {{ orphanScanning ? '扫描中...' : '扫描未引用图片' }}
+                </button>
+                <button type="button" class="btn btn-danger"
+                        v-if="orphanList.length"
+                        @click="cleanOrphanUploads"
+                        :disabled="orphanCleaning">
+                    {{ orphanCleaning ? '清理中...' : ('清理这 ' + orphanList.length + ' 个文件（' + orphanSizeText + '）') }}
+                </button>
+            </div>
+            <div v-if="orphanScanned && !orphanList.length" class="empty-tip" style="margin-top:8px">
+                没有可清理的图片，存储空间很干净。
+            </div>
+            <div v-if="orphanList.length" class="orphan-list">
+                <p class="form-hint">以下 {{ orphanList.length }} 个文件未被任何错题或学习资源引用：</p>
+                <details class="typical-item">
+                    <summary>查看文件列表</summary>
+                    <ul class="orphan-items">
+                        <li v-for="f in orphanList.slice(0, 100)" :key="f.path">
+                            {{ f.path }}<span class="typical-source"> · {{ (f.size/1024).toFixed(1) }} KB</span>
+                        </li>
+                    </ul>
+                    <p v-if="orphanList.length > 100" class="form-hint">仅显示前 100 项，其余同样会被清理。</p>
+                </details>
+            </div>
             <h4 class="section-gap danger-heading">删除账号</h4>
             <div class="form-row"><input type="password" v-model="accountForm.delete_password" placeholder="输入密码确认删除"></div>
             <button type="button" class="btn btn-danger" @click="deleteAccount">永久删除账号及全部数据</button>

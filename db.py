@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import os
 import math
+import time
 import sqlite3
 import uuid
 import contextvars
@@ -1180,6 +1181,181 @@ def feedback_boost_map(subject_id=None):
         kid: round(FEEDBACK_MAX_BOOST * math.tanh(count / FEEDBACK_SATURATION), 3)
         for kid, count in net.items()
     }
+
+# ---------- 孤儿上传文件 ----------
+# 上传根目录（与 app.py 的 UPLOAD_DIR 必须一致）。
+# 这里独立定义而不是从 app 导入，避免 app <-> db 循环依赖。
+UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+
+# 只有这两个字段会引用本地 /uploads/ 下的文件。
+# learning_resources.url 存的是 B站等外部链接，绝不能当成本地文件处理。
+UPLOAD_REF_FIELDS = (
+    ('questions', 'title_image'),
+    ('learning_resources', 'attachment'),
+)
+
+# 清理时必须跳过的前缀：这些是流程中的临时文件，由各自的代码路径负责删除，
+# 不参与孤儿判定（import_*.db 备份临时库、pdf_page_* OCR 中间图）。
+UPLOAD_TEMP_PREFIXES = ('import_', 'pdf_page_')
+
+# 允许被清理的前缀白名单。只清理本程序自己生成的文件，
+# 目录里其他任何文件一律不碰，避免误删用户手动放入的内容。
+UPLOAD_MANAGED_PREFIXES = ('upload_', 'ocr_', 'attach_')
+
+
+def _upload_relpath(ref):
+    """把数据库里的 /uploads/u1/x.png 归一化成 u1/x.png。
+
+    返回 None 表示这不是一个指向本地上传目录的引用
+    （例如外部 URL、空值或别的路径），不应参与本地文件匹配。
+    """
+    if not ref:
+        return None
+    ref = str(ref).strip().replace('\\', '/')
+    marker = '/uploads/'
+    idx = ref.find(marker)
+    if idx == -1:
+        return None
+    rel = ref[idx + len(marker):]
+    # 去掉查询串，防止 ?v=xxx 影响匹配
+    rel = rel.split('?')[0].split('#')[0]
+    parts = [p for p in rel.split('/') if p and p not in ('.', '..')]
+    if not parts:
+        return None
+    return '/'.join(parts)
+
+
+def referenced_upload_paths():
+    """返回所有被引用的上传文件相对路径集合（相对 uploads/ 目录）。
+
+    全局扫描所有用户的数据，任一用户的引用都算「在用」，
+    这样清理时绝不会删掉别人正在使用的文件。
+    """
+    refs = set()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        for table, column in UPLOAD_REF_FIELDS:
+            # 表名/列名来自内部常量，不拼用户输入；值用参数绑定，
+            # 避免引号转义出错（之前手写 != '' 少一个引号，SQL 报错后被
+            # 静默吞掉，导致引用集合恒为空、险些误删正在使用的图片）。
+            try:
+                rows = conn.execute(
+                    f'SELECT {column} FROM {table} WHERE {column} IS NOT NULL AND {column} != ?',
+                    ('',)
+                ).fetchall()
+            except sqlite3.Error:
+                # 只有「表/列不存在」（旧库结构）才跳过；其他错误要暴露出来，
+                # 否则清理逻辑会在引用信息缺失的情况下误判为孤儿。
+                exists = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+                ).fetchone()
+                if not exists:
+                    continue
+                raise
+            for (value,) in rows:
+                rel = _upload_relpath(value)
+                if rel:
+                    refs.add(rel)
+    finally:
+        conn.close()
+    return refs
+
+
+def list_orphan_uploads(user_id=None, min_age_seconds=3600):
+    """列出可清理的孤儿上传文件。
+
+    判定条件（全部满足才算孤儿）：
+    1. 文件名前缀在本程序的托管白名单内；
+    2. 没有任何错题或学习资源引用它；
+    3. 修改时间早于 min_age_seconds，避开「刚上传、题目还没保存」的窗口期。
+
+    user_id 不为空时只扫描该用户自己的目录，不触碰其他人的文件。
+    """
+    refs = referenced_upload_paths()
+    now = time.time()
+    orphans = []
+    roots = []
+    if user_id is not None:
+        roots.append(os.path.join(UPLOAD_DIR, f'u{int(user_id)}'))
+    else:
+        roots.append(UPLOAD_DIR)
+
+    for base in roots:
+        if not os.path.isdir(base):
+            continue
+        for root, dirs, files in os.walk(base):
+            # 不跟随符号链接目录，避免跳出上传目录
+            dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(root, d))]
+            for name in files:
+                if not name.startswith(UPLOAD_MANAGED_PREFIXES):
+                    continue
+                full = os.path.join(root, name)
+                if os.path.islink(full):
+                    continue
+                rel = os.path.relpath(full, UPLOAD_DIR).replace('\\', '/')
+                if rel in refs:
+                    continue
+                try:
+                    st = os.stat(full)
+                except OSError:
+                    continue
+                if now - st.st_mtime < min_age_seconds:
+                    continue  # 太新，可能正在录入中
+                orphans.append({
+                    'path': rel,
+                    'size': st.st_size,
+                    'mtime': datetime.utcfromtimestamp(st.st_mtime).isoformat(),
+                })
+    orphans.sort(key=lambda x: x['mtime'])
+    return orphans
+
+
+def delete_orphan_uploads(paths, user_id=None):
+    """删除指定的孤儿文件，返回 (已删除列表, 跳过列表, 释放字节数)。
+
+    删除前会重新校验每个路径：必须仍在托管白名单内、必须仍是孤儿、
+    必须位于允许的目录内，防止调用方传入构造的路径删除其他文件。
+    """
+    refs = referenced_upload_paths()
+    deleted, skipped, freed = [], [], 0
+    upload_root = os.path.realpath(UPLOAD_DIR)
+    for rel in paths or []:
+        rel = str(rel).replace('\\', '/').lstrip('/')
+        parts = [p for p in rel.split('/') if p and p not in ('.', '..')]
+        if not parts:
+            skipped.append(rel)
+            continue
+        rel = '/'.join(parts)
+        name = parts[-1]
+        # 1) 只允许托管前缀
+        if not name.startswith(UPLOAD_MANAGED_PREFIXES):
+            skipped.append(rel)
+            continue
+        # 2) 指定了用户时，只允许删自己目录下的文件
+        if user_id is not None and not rel.startswith(f'u{int(user_id)}/'):
+            skipped.append(rel)
+            continue
+        full = os.path.realpath(os.path.join(UPLOAD_DIR, rel))
+        # 3) 路径必须仍在上传目录内（防 ../ 逃逸与符号链接逃逸）
+        if not (full == upload_root or full.startswith(upload_root + os.sep)):
+            skipped.append(rel)
+            continue
+        # 4) 必须仍然是孤儿（防止扫描后被别的请求引用上了）
+        if rel in refs:
+            skipped.append(rel)
+            continue
+        if not os.path.isfile(full) or os.path.islink(full):
+            skipped.append(rel)
+            continue
+        try:
+            size = os.path.getsize(full)
+            os.remove(full)
+            deleted.append(rel)
+            freed += size
+        except OSError:
+            skipped.append(rel)
+    return deleted, skipped, freed
+
 
 # ---------- learning resources ----------
 def list_learning_resources(kp_id):
