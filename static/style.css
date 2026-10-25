@@ -257,23 +257,11 @@
 .section {
     position: relative;
     padding: var(--space-6);
-    overflow: hidden;
     background: var(--c-surface);
     border: 1px solid var(--c-border);
     border-radius: var(--r-lg);
     box-shadow: var(--sh-1);
     animation: page-enter var(--dur-slow) var(--ease-enter) both;
-}
-
-.section::after {
-    content: "";
-    position: absolute;
-    top: -96px;
-    right: -72px;
-    width: 260px;
-    height: 260px;
-    pointer-events: none;
-    background: linear-gradient(135deg, transparent 42%, var(--c-light-band) 42% 49%, transparent 49%);
 }
 
 /* 区块标题行：标题在左，操作按钮（如录入页的「返回」）在右 */
@@ -289,6 +277,71 @@
     margin: 0;
 }
 
+/* 首页「薄弱知识点 TOP3」：名称 + 分值 + 进度条，一屏内信息更完整 */
+.weak-top-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+
+.weak-top-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+}
+
+.weak-top-name {
+    overflow: hidden;
+    color: var(--c-text);
+    font-size: var(--fs-base);
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.weak-top-score {
+    flex: none;
+    font-size: var(--fs-sm);
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.weak-top-score.lv-high { color: var(--c-danger); }
+.weak-top-score.lv-mid { color: #b07d1f; }
+.weak-top-score.lv-low { color: var(--c-text-tertiary); }
+
+.weak-top-bar {
+    height: 6px;
+    overflow: hidden;
+    background: var(--c-surface-muted);
+    border-radius: var(--r-pill);
+}
+
+.weak-top-bar > span {
+    display: block;
+    height: 100%;
+    min-width: 2px;
+    border-radius: var(--r-pill);
+    transition: width var(--dur-slow) var(--ease-standard);
+}
+
+.weak-top-bar > span.lv-high { background: var(--c-danger); }
+.weak-top-bar > span.lv-mid { background: #d9a13b; }
+.weak-top-bar > span.lv-low { background: var(--c-brand-300); }
+
+/* 录入页第二步的左标签，替代重复的页面大标题 */
+.step-label {
+    color: var(--c-text-secondary);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
 .section > * {
     position: relative;
     z-index: 1;
@@ -296,21 +349,11 @@
 
 .section h2 {
     position: relative;
-    margin: 0 0 var(--space-6);
-    padding-left: var(--space-4);
-    font-size: var(--fs-xl);
+    margin: 0 0 var(--space-5);
+    padding-left: 0;
+    font-size: var(--fs-lg);
     font-weight: 600;
-}
-
-.section h2::before {
-    content: "";
-    position: absolute;
-    top: 2px;
-    bottom: 2px;
-    left: 0;
-    width: 3px;
-    background: var(--c-brand-500);
-    border-radius: var(--r-pill);
+    letter-spacing: -0.01em;
 }
 
 .section h3,
@@ -375,6 +418,7 @@
 .dashboard-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    align-items: start;          /* 两列各自高度，避免矮卡片被拉长留白 */
     gap: var(--space-6);
     margin: var(--space-6) 0;
 }
@@ -929,10 +973,24 @@
 
 /* 筛选与标签 */
 .filters {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     gap: var(--space-3);
     margin-bottom: var(--space-4);
+}
+
+/* 搜索框通常需要更宽，占两列 */
+.filters input[type="text"],
+.filters input[type="search"] {
+    grid-column: span 2;
+    min-width: 0;
+}
+
+@media (max-width: 900px) {
+    .filters input[type="text"],
+    .filters input[type="search"] {
+        grid-column: auto;
+    }
 }
 
 .filter-label {
@@ -1470,6 +1528,18 @@
     background: var(--c-surface-muted);
     border: 1px solid var(--c-border);
     border-radius: var(--r-md);
+}
+
+/* 批量操作的下拉不需要铺满整行，按内容宽度即可，避免工具栏占两行 */
+.batch-toolbar select {
+    width: auto;
+    min-width: 160px;
+    flex: 0 0 auto;
+}
+
+.batch-toolbar .batch-check {
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .batch-check {

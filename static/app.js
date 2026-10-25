@@ -270,6 +270,11 @@ const appOptions = {
         currentNavHint() {
             return this.currentNavItem ? (this.currentNavItem.hint || '') : '';
         },
+        // 录入页第二步显示当前正在用哪种方式，替代原来重复的页面标题
+        inputModeLabel() {
+            const map = { manual: '手动输入', camera: '拍照输入', file: '文件上传' };
+            return map[this.inputMode] || '';
+        },
         unmasteredCount() {
             return this.dashboardStats.unmastered;
         },
@@ -417,6 +422,13 @@ const appOptions = {
         this.bootstrap();
     },
     methods: {
+        // 薄弱指数分档：用于首页 TOP3 的配色与进度条长度（模板里带参数调用，必须在 methods）
+        weakLevel(score) {
+            const v = Number(score) || 0;
+            if (v >= 7) return 'high';
+            if (v >= 4) return 'mid';
+            return 'low';
+        },
         async bootstrap() {
             this.loading = true;
             this.authUser = null;
