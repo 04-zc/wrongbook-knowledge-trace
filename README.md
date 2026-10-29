@@ -132,11 +132,6 @@ python app.py
 │   ├── icons/              应用图标
 │   └── vendor/             第三方库（Vue / ECharts / KaTeX / Lucide）
 │
-├── docs/                   项目文档
-│   ├── 软件使用说明.md
-│   ├── 功能模块说明.md
-│   └── 录屏测试流程.md      全功能测试步骤
-│
 ├── tools/                  开发与测试脚本
 │   ├── e2e_check.py        端到端主流程回归
 │   ├── test_fixes.py       安全与稳定性回归
@@ -175,16 +170,6 @@ python tools/test_reports.py     # 27 项 · Word/PDF 报表逐页核对
 | `test_weak.py` | 11 | 薄弱指数算法稳定性 |
 | `test_integration.py` | 8 | AI 推荐 · 流式输出 · 知识溯源 · OCR 解析 |
 | `test_reports.py` | 27 | Word 段落表格 · PDF 每页文本 · 汇总一致性 |
-
----
-
-## 📖 文档
-
-| 文档 | 说明 |
-|---|---|
-| [软件使用说明](docs/软件使用说明.md) | 面向使用者的完整操作指南 |
-| [功能模块说明](docs/功能模块说明.md) | 各模块设计与实现细节 |
-| [录屏测试流程](docs/录屏测试流程.md) | 全功能演示步骤与验收清单 |
 
 ---
 
@@ -227,6 +212,6 @@ python tools/test_reports.py     # 27 项 · Word/PDF 报表逐页核对
 
 **本项目面向个人学习场景设计与实现**
 
-如遇问题，请先尝试 Ctrl + Shift + R 硬刷新，或查看 [录屏测试流程](docs/录屏测试流程.md) 中的排查表
+如遇问题，请先尝试 Ctrl + Shift + R 硬刷新；界面仍异常时检查浏览器是否启用了旧的 Service Worker
 
 </div>
