@@ -87,6 +87,57 @@ axios.interceptors.response.use(
     }
 );
 
+// ---- 统一确认框 / 提示框 ----
+// 全局只保留一个待决会话；同一时刻只可能有一个对话框，符合模态语义。
+let _dialogResolve = null;
+
+function _openDialog(mode, message, options) {
+    const opts = options || {};
+    // 已有对话框未关闭时，先把它按"取消"结掉，避免 Promise 悬挂
+    if (_dialogResolve) {
+        const prev = _dialogResolve;
+        _dialogResolve = null;
+        prev(false);
+    }
+    const appInstance = window.appInstance && window.appInstance._instance
+        ? window.appInstance._instance.proxy
+        : null;
+    if (!appInstance) {
+        // 极端情况下（应用未挂载）退回到原生实现，保证流程不中断
+        return Promise.resolve(mode === 'confirm' ? window.confirm(message) : (window.alert(message), true));
+    }
+    appInstance.dialog = {
+        show: true,
+        mode,
+        title: opts.title || (mode === 'confirm' ? '请确认' : '提示'),
+        message: String(message == null ? '' : message),
+        confirmText: opts.confirmText || (mode === 'confirm' ? '确定' : '知道了'),
+        cancelText: opts.cancelText || '取消',
+        danger: !!opts.danger
+    };
+    return new Promise(resolve => {
+        _dialogResolve = resolve;
+    });
+}
+
+function askConfirm(message, options) {
+    return _openDialog('confirm', message, options);
+}
+
+function showAlert(message, options) {
+    return _openDialog('alert', message, options);
+}
+
+function resolveDialog(value) {
+    const resolve = _dialogResolve;
+    _dialogResolve = null;
+    const appInstance = window.appInstance && window.appInstance._instance
+        ? window.appInstance._instance.proxy
+        : null;
+    if (appInstance) appInstance.dialog.show = false;
+    if (resolve) resolve(value);
+}
+
 function emptyForm() {
     return {
         subject_id: null,
@@ -143,6 +194,16 @@ const appOptions = {
             deletingSubject: false,
             showKpManager: false,
             reopenKpManagerAfterDetail: false,
+            // 统一样式的确认框 / 提示框（替代浏览器原生 confirm/alert）
+            dialog: {
+                show: false,
+                mode: 'confirm',   // confirm | alert
+                title: '',
+                message: '',
+                confirmText: '确定',
+                cancelText: '取消',
+                danger: false
+            },
             // 孤儿图片清理
             orphanList: [],
             orphanScanning: false,
@@ -591,10 +652,10 @@ const appOptions = {
         },
         async renameAccount() {
             if (!this.accountForm.new_username || !this.accountForm.rename_password) {
-                alert('请输入新账号和当前密码');
+                await showAlert('请输入新账号和当前密码');
                 return;
             }
-            if (!confirm('确认修改账号名称？')) return;
+            if (!await askConfirm('确认修改账号名称？')) return;
             try {
                 const res = await axios.post('/api/auth/rename', {
                     new_username: this.accountForm.new_username,
@@ -603,17 +664,17 @@ const appOptions = {
                 this.authUser.username = res.data.username;
                 this.accountForm.new_username = '';
                 this.accountForm.rename_password = '';
-                alert('账号已修改');
+                await showAlert('账号已修改');
             } catch (e) {
-                alert((e.response && e.response.data && e.response.data.error) || '修改失败');
+                await showAlert((e.response && e.response.data && e.response.data.error) || '修改失败');
             }
         },
         async changePassword() {
             if (this.accountForm.new_password !== this.accountForm.confirm_password) {
-                alert('两次输入的新密码不一致');
+                await showAlert('两次输入的新密码不一致');
                 return;
             }
-            if (!confirm('确认修改密码？')) return;
+            if (!await askConfirm('确认修改密码？')) return;
             try {
                 await axios.post('/api/auth/change_password', {
                     old_password: this.accountForm.old_password,
@@ -624,10 +685,10 @@ const appOptions = {
                 this.accountForm.confirm_password = '';
                 this.showAccountModal = false;
                 // 后端改密后会清空会话，需用新密码重新登录
-                alert('密码已修改，请使用新密码重新登录');
+                await showAlert('密码已修改，请使用新密码重新登录');
                 await this.switchUser();
             } catch (e) {
-                alert((e.response && e.response.data && e.response.data.error) || '修改失败');
+                await showAlert((e.response && e.response.data && e.response.data.error) || '修改失败');
             }
         },
         // ---- 孤儿图片清理：先扫描预览，用户确认后才删除 ----
@@ -640,10 +701,10 @@ const appOptions = {
                 this.orphanSizeText = res.data.readable_size || '0 B';
                 this.orphanScanned = true;
                 if (!this.orphanList.length) {
-                    alert('没有发现可清理的图片。');
+                    await showAlert('没有发现可清理的图片。');
                 }
             } catch (e) {
-                alert((e.response && e.response.data && e.response.data.error) || '扫描失败');
+                await showAlert((e.response && e.response.data && e.response.data.error) || '扫描失败');
             } finally {
                 this.orphanScanning = false;
             }
@@ -651,44 +712,46 @@ const appOptions = {
         async cleanOrphanUploads() {
             if (!this.orphanList.length) return;
             const n = this.orphanList.length;
-            if (!confirm('确认删除这 ' + n + ' 个未被引用的图片？\n\n删除后无法恢复，但不影响任何错题和学习资源。')) return;
+            if (!await askConfirm('确认删除这 ' + n + ' 个未被引用的图片？\n\n删除后无法恢复，但不影响任何错题和学习资源。',
+                { title: '清理未引用图片', confirmText: '确认清理', danger: true })) return;
             this.orphanCleaning = true;
             try {
                 const paths = this.orphanList.map(f => f.path);
                 const res = await axios.post('/api/uploads/orphans', { paths });
                 const d = res.data || {};
-                alert('已清理 ' + (d.deleted_count || 0) + ' 个文件，释放 ' + (d.readable_size || '0 B') +
+                await showAlert('已清理 ' + (d.deleted_count || 0) + ' 个文件，释放 ' + (d.readable_size || '0 B') +
                       (d.skipped_count ? ('\n有 ' + d.skipped_count + ' 个文件因仍被引用而跳过。') : ''));
                 await this.scanOrphanUploads();
             } catch (e) {
-                alert((e.response && e.response.data && e.response.data.error) || '清理失败');
+                await showAlert((e.response && e.response.data && e.response.data.error) || '清理失败');
             } finally {
                 this.orphanCleaning = false;
             }
         },
         async deleteAccount() {
-            if (!confirm('删除账号会清空所有错题、知识树和学习记录，且无法恢复，确定继续？')) return;
+            if (!await askConfirm('删除账号会清空所有错题、知识树和学习记录，且无法恢复，确定继续？',
+                { title: '永久删除账号', confirmText: '删除账号', danger: true })) return;
             try {
                 await axios.delete('/api/auth/account', { data: { password: this.accountForm.delete_password } });
                 clearCachedUserId();
                 this.showAccountModal = false;
                 this.authUser = null;
-                alert('账号已删除');
+                await showAlert('账号已删除');
             } catch (e) {
-                alert((e.response && e.response.data && e.response.data.error) || '删除失败');
+                await showAlert((e.response && e.response.data && e.response.data.error) || '删除失败');
             }
         },
         async importBackup(event, kind) {
             const file = event.target.files && event.target.files[0];
             event.target.value = '';
             if (!file) return;
-            if (!confirm('导入会把备份数据合并到当前账号，确定继续？')) return;
+            if (!await askConfirm('导入会把备份数据合并到当前账号，确定继续？')) return;
             const fd = new FormData();
             fd.append('file', file);
             try {
                 const res = await axios.post(`/api/backup/import/${kind}`, fd);
                 const s = res.data.stats || {};
-                alert(`导入完成：学科 ${s.subjects || 0}，知识点 ${s.knowledge_points || 0}，错题 ${s.questions || 0}`);
+                await showAlert(`导入完成：学科 ${s.subjects || 0}，知识点 ${s.knowledge_points || 0}，错题 ${s.questions || 0}`);
                 await this.loadSubjects();
                 await this.loadKnowledgePoints();
                 await this.loadQuestions();
@@ -696,20 +759,20 @@ const appOptions = {
                 await this.loadWeak();
                 await this.loadGraph();
             } catch (e) {
-                alert((e.response && e.response.data && e.response.data.error) || '导入失败');
+                await showAlert((e.response && e.response.data && e.response.data.error) || '导入失败');
             }
         },
         async importBackupPackage(event) {
             const file = event.target.files && event.target.files[0];
             event.target.value = '';
             if (!file) return;
-            if (!confirm('导入会把数据包内容合并到当前账号，确定继续？')) return;
+            if (!await askConfirm('导入会把数据包内容合并到当前账号，确定继续？')) return;
             const fd = new FormData();
             fd.append('file', file);
             try {
                 const res = await axios.post('/api/backup/import', fd);
                 const s = res.data.stats || {};
-                alert(`导入完成：学科 ${s.subjects || 0}，知识点 ${s.knowledge_points || 0}，错题 ${s.questions || 0}`);
+                await showAlert(`导入完成：学科 ${s.subjects || 0}，知识点 ${s.knowledge_points || 0}，错题 ${s.questions || 0}`);
                 await this.loadSubjects();
                 await this.loadKnowledgePoints();
                 await this.loadQuestions();
@@ -718,7 +781,7 @@ const appOptions = {
                 await this.loadGraph();
                 await this.loadReport();
             } catch (e) {
-                alert((e.response && e.response.data && e.response.data.error) || '导入失败');
+                await showAlert((e.response && e.response.data && e.response.data.error) || '导入失败');
             }
         },
         openResetModal() {
@@ -727,11 +790,11 @@ const appOptions = {
         },
         async resetPassword() {
             if (!this.resetPasswordForm.old_password) {
-                alert('请输入原密码');
+                await showAlert('请输入原密码');
                 return;
             }
             if (this.resetPasswordForm.new_password !== this.resetPasswordForm.confirm_password) {
-                alert('两次输入的密码不一致');
+                await showAlert('两次输入的密码不一致');
                 return;
             }
             try {
@@ -741,9 +804,9 @@ const appOptions = {
                     new_password: this.resetPasswordForm.new_password
                 });
                 this.showResetModal = false;
-                alert('密码已重置，请使用新密码登录');
+                await showAlert('密码已重置，请使用新密码登录');
             } catch (e) {
-                alert((e.response && e.response.data && e.response.data.error) || '重置失败');
+                await showAlert((e.response && e.response.data && e.response.data.error) || '重置失败');
             }
         },
         emptyForm() {
@@ -767,9 +830,17 @@ const appOptions = {
             if (key !== 'input') this.inputMode = '';
             if (key === 'library') this.loadLibraryPage();
         },
+        // 模板里调用：把确认框结果交回给等待中的 Promise
+        resolveDialog(value) {
+            resolveDialog(value);
+        },
         // 关闭当前最上层的一个弹窗（Escape 键使用）。
         // 按「后开的先关」顺序判断，保证一次只退一层。
         closeTopOverlay() {
+            if (this.dialog && this.dialog.show) {
+                resolveDialog(false);
+                return true;
+            }
             if (this.kpDetail && this.kpDetail.show) { this.closeKpDetail(); return true; }
             if (this.cameraActive) { this.closeCamera(); return true; }
             if (this.showKpSelector) { this.showKpSelector = false; return true; }
@@ -975,11 +1046,11 @@ const appOptions = {
         },
         async requestReminderPermission() {
             if (!window.isSecureContext) {
-                alert('浏览器通知需要 HTTPS 或 localhost。手机通过局域网 IP 访问时，请优先使用「导出日历」把复习计划加入手机日历。');
+                await showAlert('浏览器通知需要 HTTPS 或 localhost。手机通过局域网 IP 访问时，请优先使用「导出日历」把复习计划加入手机日历。');
                 return;
             }
             if (!('Notification' in window)) {
-                alert('当前浏览器不支持系统通知，请使用手机日历导入复习计划。');
+                await showAlert('当前浏览器不支持系统通知，请使用手机日历导入复习计划。');
                 return;
             }
             let permission = Notification.permission;
@@ -990,9 +1061,9 @@ const appOptions = {
                 this.settings.reminder_enabled = 'true';
                 await this.saveReminderSettings();
                 this.checkReminder(true);
-                alert('浏览器复习提醒已开启');
+                await showAlert('浏览器复习提醒已开启');
             } else {
-                alert('未获得通知权限，可在浏览器设置中重新开启。');
+                await showAlert('未获得通知权限，可在浏览器设置中重新开启。');
             }
         },
         async saveReminderSettings() {
@@ -1024,13 +1095,13 @@ const appOptions = {
             });
         },
         async generateTodayPlans() {
-            if (!confirm('根据当前薄弱知识点自动生成今日复习计划？')) return;
+            if (!await askConfirm('根据当前薄弱知识点自动生成今日复习计划？')) return;
             const res = await axios.post('/api/review/plans/generate', {
                 subject_id: this.reviewFilter.subject_id,
                 limit: 10
             });
             await this.loadReviewPlans();
-            alert(`已生成 ${res.data.created} 条复习计划`);
+            await showAlert(`已生成 ${res.data.created} 条复习计划`);
         },
         openPlanModal(q) {
             this.planQuestion = q;
@@ -1040,7 +1111,7 @@ const appOptions = {
         },
         async savePlanForQuestion() {
             if (!this.planQuestion || !this.planDate) return;
-            if (!confirm(`确认把这道题安排到 ${this.planDate} 复习？`)) return;
+            if (!await askConfirm(`确认把这道题安排到 ${this.planDate} 复习？`)) return;
             await axios.post('/api/review/plans', {
                 question_id: this.planQuestion.id,
                 plan_date: this.planDate,
@@ -1048,11 +1119,11 @@ const appOptions = {
             });
             this.showPlanModal = false;
             await this.loadReviewPlans();
-            alert('已加入复习计划');
+            await showAlert('已加入复习计划');
         },
         async completePlan(plan, result) {
             const label = result === 1 ? '已完成' : '已跳过';
-            if (!confirm(`确认把这条计划标记为「${label}」？`)) return;
+            if (!await askConfirm(`确认把这条计划标记为「${label}」？`)) return;
             await axios.post(`/api/review/plans/${plan.id}/complete`, { result });
             await this.loadReviewPlans();
             await this.loadReview();
@@ -1063,7 +1134,7 @@ const appOptions = {
             this.openReviewQuestion(res.data);
         },
         async deletePlan(plan) {
-            if (!confirm('确定删除这条复习计划？')) return;
+            if (!await askConfirm('确定删除这条复习计划？')) return;
             await axios.delete(`/api/review/plans/${plan.id}`);
             await this.loadReviewPlans();
         },
@@ -1281,7 +1352,7 @@ const appOptions = {
             }
         },
         async generateGraphSummary() {
-            if (!this.ensureApiKey()) return;
+            if (!(await this.ensureApiKey())) return;
             this.graphDetail.aiLoading = true;
             try {
                 this.graphDetail.aiContent = '';
@@ -1293,31 +1364,31 @@ const appOptions = {
                 });
                 this.graphDetail.aiContent = this.humanizeMath(this.graphDetail.aiContent);
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || err.message || '生成失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || err.message || '生成失败');
             } finally {
                 this.graphDetail.aiLoading = false;
             }
         },
         async saveGraphDescription() {
-            if (!confirm('确认保存知识点说明？')) return;
+            if (!await askConfirm('确认保存知识点说明？')) return;
             await axios.post(`/api/knowledge_points/${this.graphDetail.kp.id}/description`, {
                 description: this.graphDetail.description
             });
             this.graphDetail.kp.description = this.graphDetail.description;
             await this.loadKnowledgePoints();
             await this.loadGraph();
-            alert('知识点说明已保存');
+            await showAlert('知识点说明已保存');
         },
         async saveMaterialEdit(m) {
-            if (!confirm('确认保存这份知识库内容的修改？')) return;
+            if (!await askConfirm('确认保存这份知识库内容的修改？')) return;
             await axios.post(`/api/ai/materials/${m.id}`, { content: m.content });
-            alert('已保存修改');
+            await showAlert('已保存修改');
         },
         // 新增知识库内容里的「AI 推荐」：按当前选中的类型生成一份精简草稿，
         // 先放进 aiDraftContent，由用户点「用 AI 结果填充」再写入输入框，
         // 避免直接覆盖用户已经手打的内容。
         async generateMaterialDraft(containerKey) {
-            if (!this.ensureApiKey()) return;
+            if (!(await this.ensureApiKey())) return;
             const c = this[containerKey];
             const type = c.newType || 'note';
             // 笔记没有专用生成模板，退化成知识点精要草稿
@@ -1331,10 +1402,10 @@ const appOptions = {
                 });
                 c.aiDraftContent = res.data.content || '';
                 if (!c.aiDraftContent) {
-                    alert('AI 没有返回内容，请稍后重试');
+                    await showAlert('AI 没有返回内容，请稍后重试');
                 }
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || 'AI 推荐失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || 'AI 推荐失败');
             } finally {
                 c.aiDraftLoading = false;
             }
@@ -1347,10 +1418,10 @@ const appOptions = {
         async createMaterial(containerKey) {            const c = this[containerKey];
             const content = (c.newContent || '').trim();
             if (!content) {
-                alert('请输入内容');
+                await showAlert('请输入内容');
                 return;
             }
-            if (!confirm('确认新增这条知识库内容？')) return;
+            if (!await askConfirm('确认新增这条知识库内容？')) return;
             await axios.post('/api/ai/materials', {
                 kp_id: c.kp.id,
                 mode: c.newType,
@@ -1360,7 +1431,7 @@ const appOptions = {
             await this.reloadMaterials(containerKey);
         },
         async deleteMaterial(m, containerKey) {
-            if (!confirm('确定删除这条知识库内容？')) return;
+            if (!await askConfirm('确定删除这条知识库内容？')) return;
             await axios.delete(`/api/ai/materials/${m.id}`);
             await this.reloadMaterials(containerKey);
         },
@@ -1371,7 +1442,7 @@ const appOptions = {
         },
         async saveGraphSummary() {
             if (!this.graphDetail.aiContent.trim()) return;
-            if (!confirm('确认把这份知识点精要保存到知识库？')) return;
+            if (!await askConfirm('确认把这份知识点精要保存到知识库？')) return;
             await axios.post('/api/ai/save', {
                 kp_id: this.graphDetail.kp.id,
                 mode: 'summary',
@@ -1379,26 +1450,26 @@ const appOptions = {
             });
             const res = await axios.get('/api/ai/materials', { params: { kp_id: this.graphDetail.kp.id } });
             this.graphDetail.materials = res.data || [];
-            alert('已保存');
+            await showAlert('已保存');
         },
         async applyGraphSummaryAsDescription() {
             if (!this.graphDetail.aiContent.trim()) return;
-            if (!confirm('确认把这份 AI 精要设为该知识点的详细说明？')) return;
+            if (!await askConfirm('确认把这份 AI 精要设为该知识点的详细说明？')) return;
             await axios.post(`/api/knowledge_points/${this.graphDetail.kp.id}/description`, {
                 description: this.graphDetail.aiContent
             });
             this.graphDetail.kp.description = this.graphDetail.aiContent;
             await this.loadKnowledgePoints();
             await this.loadGraph();
-            alert('已更新知识点说明');
+            await showAlert('已更新知识点说明');
         },
         async saveResource(resource = null) {
             const payload = resource || this.graphDetail.resourceForm;
             if (!payload.title && !payload.url && !payload.content && !payload.page) {
-                alert('请至少填写标题、页码、链接或笔记内容');
+                await showAlert('请至少填写标题、页码、链接或笔记内容');
                 return;
             }
-            if (!confirm('确认保存这条学习资源？')) return;
+            if (!await askConfirm('确认保存这条学习资源？')) return;
             if (resource && resource.id) {
                 await axios.post(`/api/resources/${resource.id}`, payload);
             } else {
@@ -1407,10 +1478,10 @@ const appOptions = {
             }
             const res = await axios.get(`/api/knowledge_points/${this.graphDetail.kp.id}/resources`);
             this.graphDetail.resources = res.data || [];
-            alert('学习资源已保存');
+            await showAlert('学习资源已保存');
         },
         async deleteResource(resource) {
-            if (!confirm('确定删除这条学习资源？')) return;
+            if (!await askConfirm('确定删除这条学习资源？')) return;
             await axios.delete(`/api/resources/${resource.id}`);
             const res = await axios.get(`/api/knowledge_points/${this.graphDetail.kp.id}/resources`);
             this.graphDetail.resources = res.data || [];
@@ -1423,10 +1494,10 @@ const appOptions = {
             fd.append('file', file);
             const res = await axios.post('/api/upload_attachment', fd);
             this.graphDetail.resourceForm.attachment = res.data.url;
-            alert('附件已上传');
+            await showAlert('附件已上传');
         },
         async generateAiResources() {
-            if (!this.ensureApiKey()) return;
+            if (!(await this.ensureApiKey())) return;
             this.graphDetail.aiResourcesLoading = true;
             try {
                 const res = await axios.post('/api/ai/generate', {
@@ -1435,7 +1506,7 @@ const appOptions = {
                 });
                 this.graphDetail.aiResources = res.data.resources || [];
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || '推荐失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || '推荐失败');
             } finally {
                 this.graphDetail.aiResourcesLoading = false;
             }
@@ -1452,7 +1523,7 @@ const appOptions = {
             };
         },
         async saveAiResource(item) {
-            if (!confirm('确认把这条 AI 推荐保存到学习资源？')) return;
+            if (!await askConfirm('确认把这条 AI 推荐保存到学习资源？')) return;
             await axios.post(`/api/knowledge_points/${this.graphDetail.kp.id}/resources`, {
                 type: item.type === 'course' ? 'course' : 'note',
                 title: item.title || '',
@@ -1461,7 +1532,7 @@ const appOptions = {
             });
             const res = await axios.get(`/api/knowledge_points/${this.graphDetail.kp.id}/resources`);
             this.graphDetail.resources = res.data || [];
-            alert('已保存到学习资源');
+            await showAlert('已保存到学习资源');
         },
         async selectReviewKp(kp) {
             this.reviewSelectedKp = kp;
@@ -1494,7 +1565,7 @@ const appOptions = {
         },
         async explainReviewQuestion() {
             if (!this.reviewSelectedQuestion) return;
-            if (!this.ensureApiKey()) return;
+            if (!(await this.ensureApiKey())) return;
             this.reviewAiLoading = true;
             try {
                 this.reviewAiContent = '';
@@ -1506,14 +1577,14 @@ const appOptions = {
                 });
                 this.reviewAiContent = this.humanizeMath(this.reviewAiContent);
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || err.message || 'AI 解答失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || err.message || 'AI 解答失败');
             } finally {
                 this.reviewAiLoading = false;
             }
         },
         async markReview(q, result) {
             const label = result === 1 ? '已掌握' : '仍需加强';
-            if (!confirm(`确认将这道题标记为「${label}」？`)) return;
+            if (!await askConfirm(`确认将这道题标记为「${label}」？`)) return;
             await axios.post(`/api/questions/${q.id}/review`, { result });
             const res = await axios.get('/api/questions', { params: { kp_id: this.reviewSelectedKp.id } });
             this.reviewQuestions = res.data;
@@ -1547,11 +1618,11 @@ const appOptions = {
             const name = (this.weakKpName || '').trim();
             const sid = this.weakFilter.subject_id;
             if (!name) {
-                alert('请输入知识点名称');
+                await showAlert('请输入知识点名称');
                 return;
             }
             if (!sid) {
-                alert('请先选择学科');
+                await showAlert('请先选择学科');
                 return;
             }
             const parent = this.kpTree.find(k => k.id === this.weakParentId);
@@ -1568,7 +1639,8 @@ const appOptions = {
             await this.confirmWeakKp();
         },
         async deleteWeakKp(kp) {
-            if (!confirm(`确定删除知识点「${kp.name}」？其下子知识点会一并删除。`)) return;
+            if (!await askConfirm(`确定删除知识点「${kp.name}」？其下子知识点会一并删除。`,
+                { title: '删除知识点', confirmText: '删除', danger: true })) return;
             await axios.delete(`/api/knowledge_points/${kp.id}`);
             // 弹窗里正选着被删的节点时，层级退回一级
             if (this.weakParentId === kp.id) this.weakParentId = null;
@@ -1683,7 +1755,7 @@ const appOptions = {
                 this.importPreview = (res.data.questions || []).map(q => ({ ...q, checked: true }));
                 this.importMessage = `${res.data.filename} · ${res.data.mode} · 共解析出 ${res.data.count} 道题`;
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || '文件解析失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || '文件解析失败');
             } finally {
                 this.importLoading = false;
             }
@@ -1695,32 +1767,32 @@ const appOptions = {
         async saveImportedQuestions() {
             const selected = this.importPreview.filter(q => q.checked && (q.title_text || '').trim());
             if (!selected.length) {
-                alert('请至少勾选一道题');
+                await showAlert('请至少勾选一道题');
                 return;
             }
             if (!this.form.subject_id) {
-                alert('请先在错题录入页选择学科');
+                await showAlert('请先在错题录入页选择学科');
                 return;
             }
             const subject = this.subjects.find(s => s.id === this.form.subject_id);
-            if (!confirm(`确认将 ${selected.length} 道题导入「${subject ? subject.name : ''}」？`)) return;
+            if (!await askConfirm(`确认将 ${selected.length} 道题导入「${subject ? subject.name : ''}」？`)) return;
             try {
                 const res = await axios.post('/api/import/save', {
                     subject_id: this.form.subject_id,
                     questions: selected.map(q => ({ title_text: q.title_text }))
                 });
-                alert(`成功导入 ${res.data.saved} 道题`);
+                await showAlert(`成功导入 ${res.data.saved} 道题`);
                 this.cancelImport();
                 this.currentNav = 'library';
                 await this.loadQuestions();
                 await this.loadLibraryPage();
                 await this.loadWeak();
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || '导入失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || '导入失败');
             }
         },
         async openAiMaterial(kp, mode) {
-            if (!this.ensureApiKey()) return;
+            if (!(await this.ensureApiKey())) return;
             this.aiModal = {
                 show: true,
                 kp,
@@ -1743,7 +1815,7 @@ const appOptions = {
         },
         async openTrace(question) {
             if (!question || !question.id) return;
-            if (!this.ensureApiKey()) return;
+            if (!(await this.ensureApiKey())) return;
             this.traceModal = { show: true, loading: true, saving: false, data: null };
             try {
                 const res = await axios.post(`/api/questions/${question.id}/trace`);
@@ -1753,7 +1825,7 @@ const appOptions = {
                 this.traceModal.data = data;
             } catch (err) {
                 this.traceModal.show = false;
-                alert((err.response && err.response.data && err.response.data.error) || '知识溯源失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || '知识溯源失败');
             } finally {
                 this.traceModal.loading = false;
             }
@@ -1766,10 +1838,10 @@ const appOptions = {
                 .concat((data.prerequisite_points || []).map(p => ({ ...p, group: 'prerequisite_points' })))
                 .filter(p => p._selected);
             if (!points.length) {
-                alert('请至少勾选一个知识点');
+                await showAlert('请至少勾选一个知识点');
                 return;
             }
-            if (!confirm(`确认用选中的 ${points.length} 个知识点生成知识溯源导图？`)) return;
+            if (!await askConfirm(`确认用选中的 ${points.length} 个知识点生成知识溯源导图？`)) return;
             this.traceModal.saving = true;
             try {
                 const qid = data.question_id || (this.detailQuestion && this.detailQuestion.id) || (this.reviewSelectedQuestion && this.reviewSelectedQuestion.id);
@@ -1788,7 +1860,7 @@ const appOptions = {
                     newType: 'direct'
                 };
             } catch (err) {
-                alert('确认失败');
+                await showAlert('确认失败');
             } finally {
                 this.traceModal.saving = false;
             }
@@ -1797,7 +1869,7 @@ const appOptions = {
             if (!question || !question.id) return;
             const res = await axios.get(`/api/questions/${question.id}/mindmap`);
             if (!res.data.mindmap) {
-                if (confirm('这道题还没有知识溯源导图，是否现在生成？')) {
+                if (await askConfirm('这道题还没有知识溯源导图，是否现在生成？')) {
                     this.openTrace(question);
                 }
                 return;
@@ -1831,12 +1903,12 @@ const appOptions = {
         },
         async saveMindMap() {
             const qid = this.mindMapModal.question.id;
-            if (!confirm('确认保存这张知识溯源导图？')) return;
+            if (!await askConfirm('确认保存这张知识溯源导图？')) return;
             await axios.post(`/api/questions/${qid}/mindmap`, { mindmap: this.mindMapModal.map });
-            alert('导图已保存');
+            await showAlert('导图已保存');
         },
         async generateTypicalAi(append = false) {
-            if (!this.ensureApiKey()) return;
+            if (!(await this.ensureApiKey())) return;
             this.typicalModal.view = 'ai';
             this.typicalModal.openAnswer = '';
             this.typicalAiLoading = true;
@@ -1853,7 +1925,7 @@ const appOptions = {
                     ? this.typicalModal.questions.concat(questions)
                     : questions;
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || '生成失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || '生成失败');
             } finally {
                 this.typicalAiLoading = false;
             }
@@ -1966,16 +2038,16 @@ const appOptions = {
         async saveTypicalAi() {
             const selected = this.typicalModal.questions.filter(q => q._selected);
             if (!selected.length) {
-                alert('请先勾选要保存的题目');
+                await showAlert('请先勾选要保存的题目');
                 return;
             }
-            if (!confirm(`确认把选中的 ${selected.length} 道题保存到错题库？`)) return;
+            if (!await askConfirm(`确认把选中的 ${selected.length} 道题保存到错题库？`)) return;
             await this.postTypicalQuestions(selected);
             selected.forEach(q => { q._selected = false; });
             await this.afterTypicalSaved(selected.length);
         },
         async saveTypicalOne(q) {
-            if (!confirm('确认把这道题保存到错题库？')) return;
+            if (!await askConfirm('确认把这道题保存到错题库？')) return;
             await this.postTypicalQuestions([q]);
             q._selected = false;
             await this.afterTypicalSaved(1);
@@ -1992,7 +2064,7 @@ const appOptions = {
                 });
                 return res.data.saved || 0;
             } catch (err) {
-                alert((err.response && err.response.data && err.response.data.error) || '保存失败，请重试');
+                await showAlert((err.response && err.response.data && err.response.data.error) || '保存失败，请重试');
                 throw err;
             }
         },
@@ -2001,7 +2073,7 @@ const appOptions = {
             await this.loadQuestions();
             await this.loadLibraryPage();
             await this.loadWeak();
-            alert(`已保存 ${count} 道题到错题库`);
+            await showAlert(`已保存 ${count} 道题到错题库`);
         },
         // 知识库材料的类型显示名。历史数据里可能还有 custom / typical / variant，
         // 一并给出可读名称，避免界面上直接暴露英文枚举值。
@@ -2016,11 +2088,13 @@ const appOptions = {
             };
             return map[type] || type || '内容';
         },
-        ensureApiKey() {
+        async ensureApiKey() {
             if (this.settings && this.settings.llm_api_key) return true;
-            if (confirm('尚未配置大模型 API Key。请先到右上角「大模型配置」填写 API Key 后才能使用。是否现在打开配置？')) {
-                this.openLlmConfig();
-            }
+            const go = await askConfirm(
+                '尚未配置大模型 API Key。请先到右上角「大模型配置」填写 API Key 后才能使用。是否现在打开配置？',
+                { title: '需要配置 API Key', confirmText: '去配置' }
+            );
+            if (go) this.openLlmConfig();
             return false;
         },
         async streamAi(payload, onDelta) {
@@ -2085,7 +2159,7 @@ const appOptions = {
                 this.aiModal.content = this.humanizeMath(res.data.content || '');
             } catch (err) {
                 this.aiModal.content = '';
-                alert((err.response && err.response.data && err.response.data.error) || err.message || '生成失败');
+                await showAlert((err.response && err.response.data && err.response.data.error) || err.message || '生成失败');
             } finally {
                 this.aiLoading = false;
             }
@@ -2095,28 +2169,28 @@ const appOptions = {
         },
         async saveAiMaterial() {
             if (!this.aiModal.content.trim()) {
-                alert('内容为空，无法保存');
+                await showAlert('内容为空，无法保存');
                 return;
             }
-            if (!confirm('确认把这份内容保存到知识库？')) return;
+            if (!await askConfirm('确认把这份内容保存到知识库？')) return;
             try {
                 await axios.post('/api/ai/save', {
                     kp_id: this.aiModal.kp.id,
                     mode: this.aiModal.mode,
                     content: this.aiModal.content
                 });
-                alert('已保存');
+                await showAlert('已保存');
                 this.aiModal.show = false;
             } catch (err) {
-                alert('保存失败');
+                await showAlert('保存失败');
             }
         },
         async saveQuestion() {
             if (!this.form.title_text && !this.form.title_image) {
-                alert('请输入题干文本或上传图片');
+                await showAlert('请输入题干文本或上传图片');
                 return;
             }
-            if (!confirm('确认保存这道错题？')) return;
+            if (!await askConfirm('确认保存这道错题？')) return;
             try {
                 if (this.form.id) {
                     await axios.put(`/api/questions/${this.form.id}`, this.form);
@@ -2125,10 +2199,10 @@ const appOptions = {
                 }
             } catch (err) {
                 const data = (err.response && err.response.data) || {};
-                alert(data.error || '保存失败，请重试');
+                await showAlert(data.error || '保存失败，请重试');
                 return;
             }
-            alert('保存成功');
+            await showAlert('保存成功');
             this.resetForm();
             await this.loadQuestions();
             await this.loadLibraryPage();
@@ -2153,7 +2227,7 @@ const appOptions = {
         },
         async recommendKp() {
             if (!this.form.title_text) {
-                alert('请先输入题干文本');
+                await showAlert('请先输入题干文本');
                 return;
             }
             this.recommending = true;
@@ -2175,12 +2249,12 @@ const appOptions = {
                 if (this.pendingKps.length) {
                     this.showPendingKpModal = true;
                 } else if ((rec.data.auto_bound || []).length) {
-                    alert('已自动绑定高置信度知识点');
+                    await showAlert('已自动绑定高置信度知识点');
                 } else {
-                    alert('没有达到推荐阈值的新知识点');
+                    await showAlert('没有达到推荐阈值的新知识点');
                 }
             } catch (e) {
-                alert('推荐失败：' + (e.response?.data?.error || e.message));
+                await showAlert('推荐失败：' + (e.response?.data?.error || e.message));
             } finally {
                 this.recommending = false;
             }
@@ -2208,7 +2282,7 @@ const appOptions = {
                 this.showPendingKpModal = false;
                 return;
             }
-            if (!confirm(`确认绑定选中的 ${selected.length} 个待确认知识点？`)) return;
+            if (!await askConfirm(`确认绑定选中的 ${selected.length} 个待确认知识点？`)) return;
             const res = await axios.post(`/api/questions/${this.form.id}/confirm_kp`, {
                 kp_ids: selected.map(k => k.id)
             });
@@ -2249,15 +2323,15 @@ const appOptions = {
         },
         async saveEditQuestion() {
             if (!this.form.title_text && !this.form.title_image) {
-                alert('题干文本和图片不能都为空');
+                await showAlert('题干文本和图片不能都为空');
                 return;
             }
-            if (!confirm('确认保存这次修改？')) return;
+            if (!await askConfirm('确认保存这次修改？')) return;
             try {
                 await axios.put(`/api/questions/${this.form.id}`, this.form);
             } catch (err) {
                 const data = (err.response && err.response.data) || {};
-                alert(data.error || '修改失败，请重试');
+                await showAlert(data.error || '修改失败，请重试');
                 return;
             }
             this.showEditModal = false;
@@ -2265,10 +2339,10 @@ const appOptions = {
             await this.loadQuestions();
             await this.loadLibraryPage();
             await this.loadWeak();
-            alert('修改已保存');
+            await showAlert('修改已保存');
         },
         async deleteQuestion(q) {
-            if (!confirm('确定把这道错题移入回收站？')) return;
+            if (!await askConfirm('确定把这道错题移入回收站？')) return;
             await axios.delete(`/api/questions/${q.id}`);
             await this.loadQuestions();
             await this.loadLibraryPage();
@@ -2292,17 +2366,17 @@ const appOptions = {
                 this.batchAction = '';
                 return;
             }
-            if (!confirm(`确认把选中的 ${this.selectedQuestionIds.length} 道错题移入回收站？`)) return;
+            if (!await askConfirm(`确认把选中的 ${this.selectedQuestionIds.length} 道错题移入回收站？`)) return;
             await axios.post('/api/questions/batch', { action: 'delete', ids: this.selectedQuestionIds });
             await this.loadQuestions();
             await this.loadLibraryPage();
             await this.loadWeak();
             this.batchAction = '';
-            alert('已移入回收站');
+            await showAlert('已移入回收站');
         },
-        handleBatchAction() {
+        async handleBatchAction() {
             if (!this.selectedQuestionIds.length) {
-                alert('请先多选错题');
+                await showAlert('请先多选错题', { title: '还没选择错题' });
                 this.batchAction = '';
                 return;
             }
@@ -2314,7 +2388,7 @@ const appOptions = {
         },
         async batchUpdateStatus() {
             if (!this.selectedQuestionIds.length) return;
-            if (!confirm(`确认修改 ${this.selectedQuestionIds.length} 道错题的状态？`)) return;
+            if (!await askConfirm(`确认修改 ${this.selectedQuestionIds.length} 道错题的状态？`)) return;
             await axios.post('/api/questions/batch', {
                 action: 'status',
                 ids: this.selectedQuestionIds,
@@ -2324,7 +2398,7 @@ const appOptions = {
             await this.loadLibraryPage();
             await this.loadWeak();
             this.batchAction = '';
-            alert('状态已更新');
+            await showAlert('状态已更新');
         },
         openBatchKp() {
             if (!this.selectedQuestionIds.length) return;
@@ -2340,10 +2414,10 @@ const appOptions = {
         },
         async confirmBatchKp() {
             if (!this.batchKpModal.selected.length) {
-                alert('请选择知识点');
+                await showAlert('请选择知识点');
                 return;
             }
-            if (!confirm(`确认给 ${this.selectedQuestionIds.length} 道错题关联所选知识点？`)) return;
+            if (!await askConfirm(`确认给 ${this.selectedQuestionIds.length} 道错题关联所选知识点？`)) return;
             await axios.post('/api/questions/batch', {
                 action: 'bind_kp',
                 ids: this.selectedQuestionIds,
@@ -2354,7 +2428,7 @@ const appOptions = {
             await this.loadQuestions();
             await this.loadLibraryPage();
             await this.loadWeak();
-            alert('知识点已关联');
+            await showAlert('知识点已关联');
         },
         async openTrash() {
             this.trashMode = true;
@@ -2365,13 +2439,14 @@ const appOptions = {
             await this.loadLibraryPage();
         },
         async restoreQuestion(q) {
-            if (!confirm('确定恢复这道错题？')) return;
+            if (!await askConfirm('确定恢复这道错题？')) return;
             await axios.post(`/api/questions/${q.id}/restore`);
             await this.openTrash();
             await this.loadWeak();
         },
         async purgeQuestion(q) {
-            if (!confirm('彻底删除后无法恢复，确定继续？')) return;
+            if (!await askConfirm('彻底删除后无法恢复，确定继续？',
+            { title: '彻底删除错题', confirmText: '彻底删除', danger: true })) return;
             await axios.delete(`/api/questions/${q.id}/purge`);
             await this.openTrash();
         },
@@ -2419,7 +2494,7 @@ const appOptions = {
             try {
                 await axios.delete(`/api/subjects/${s.id}`);
             } catch (e) {
-                alert('删除失败：' + ((e.response && e.response.data && e.response.data.error) || e.message));
+                await showAlert('删除失败：' + ((e.response && e.response.data && e.response.data.error) || e.message));
                 this.deletingSubject = false;
                 return;
             }
@@ -2480,11 +2555,11 @@ const appOptions = {
         async addSettingsKp() {
             const name = (this.kpForm.name || '').trim();
             if (!name) {
-                alert('请输入知识点名称');
+                await showAlert('请输入知识点名称');
                 return;
             }
             if (!this.kpForm.subject_id) {
-                alert('请先选择学科');
+                await showAlert('请先选择学科');
                 return;
             }
             const parent = this.subjectKnowledgePoints.find(k => k.id === this.kpForm.parent_id);
@@ -2501,7 +2576,8 @@ const appOptions = {
             await this.loadWeak();
         },
         async deleteSettingsKp(kp) {
-            if (!confirm(`确定删除知识点「${kp.name}」？其下子知识点会一并删除。`)) return;
+            if (!await askConfirm(`确定删除知识点「${kp.name}」？其下子知识点会一并删除。`,
+                { title: '删除知识点', confirmText: '删除', danger: true })) return;
             await axios.delete(`/api/knowledge_points/${kp.id}`);
             if (this.kpForm.parent_id === kp.id) {
                 this.kpForm.parent_id = null;
@@ -2612,11 +2688,11 @@ const appOptions = {
         async addDirKp() {
             const name = (this.kpForm.name || '').trim();
             if (!name) {
-                alert('请输入知识点名称');
+                await showAlert('请输入知识点名称');
                 return;
             }
             if (!this.kpForm.subject_id) {
-                alert('请先选择或展开一个学科');
+                await showAlert('请先选择或展开一个学科');
                 return;
             }
             try {
@@ -2655,11 +2731,12 @@ const appOptions = {
                 }, 2500);
             } catch (e) {
                 const msg = (e.response && e.response.data && e.response.data.error) || '添加失败';
-                alert(msg);
+                await showAlert(msg);
             }
         },
         async deleteDirKp(kp) {
-            if (!confirm(`确定删除知识点「${kp.name}」？其下子知识点会一并删除。`)) return;
+            if (!await askConfirm(`确定删除知识点「${kp.name}」？其下子知识点会一并删除。`,
+                { title: '删除知识点', confirmText: '删除', danger: true })) return;
             await axios.delete(`/api/knowledge_points/${kp.id}`);
             if (this.kpForm.parent_id === kp.id) {
                 this.clearDirParent();
@@ -2677,11 +2754,11 @@ const appOptions = {
         async saveLlmConfig() {
             await axios.post('/api/settings', this.settings);
             this.showLlmModal = false;
-            alert('大模型配置已保存');
+            await showAlert('大模型配置已保存');
         },
         async saveSettings() {
             await axios.post('/api/settings', this.settings);
-            alert('设置已保存');
+            await showAlert('设置已保存');
         },
         renderedTitle(text) {
             // 简单转义 HTML

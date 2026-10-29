@@ -1110,6 +1110,110 @@
     margin-bottom: var(--space-4);
 }
 
+/* ---- 统一确认框 / 提示框 ---- */
+.modal-confirm {
+    z-index: calc(var(--z-toast) - 1);   /* 高于普通弹窗，确保盖在最上面 */
+}
+
+.confirm-body {
+    width: 100%;
+    max-width: 420px;
+    padding: var(--space-6);
+}
+
+.confirm-head {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+}
+
+.confirm-head h3 {
+    margin: 0;
+    font-size: var(--fs-lg);
+    line-height: 1.4;
+}
+
+.confirm-icon {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--r-pill);
+}
+
+.confirm-icon.is-info {
+    color: var(--c-brand-700);
+    background: var(--c-brand-100);
+}
+
+.confirm-icon.is-danger {
+    color: var(--c-danger);
+    background: #fee2e2;
+}
+
+.confirm-message {
+    margin: 0 0 var(--space-5);
+    color: var(--c-text-secondary);
+    font-size: var(--fs-base);
+    line-height: 1.7;
+    white-space: pre-wrap;   /* 保留文案里的换行 */
+    word-break: break-word;
+}
+
+.confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-3);
+}
+
+.confirm-actions .btn,
+.confirm-actions .btn-primary {
+    min-width: 96px;
+}
+
+/* 危险操作的主按钮必须是红色：.btn-primary 与 .btn-danger 同为单类选择器，
+   靠后写的才会生效，这里显式提高优先级避免被品牌色盖掉。 */
+.confirm-actions .btn-primary.btn-danger {
+    color: var(--c-on-brand);
+    background: var(--c-danger);
+    border-color: var(--c-danger);
+}
+
+.confirm-actions .btn-primary.btn-danger:hover {
+    color: var(--c-on-brand);
+    background: #b91c1c;
+    border-color: #b91c1c;
+}
+
+/* 移动端：按钮铺满整行、加大点击区域，符合 44px 触控标准 */
+@media (max-width: 640px) {
+    .modal-confirm {
+        align-items: flex-end;      /* 底部弹出，拇指可达 */
+        padding: 0;
+    }
+
+    .confirm-body {
+        max-width: none;
+        padding: var(--space-5) var(--space-4) calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
+        border-radius: var(--r-lg) var(--r-lg) 0 0;
+    }
+
+    /* 保持 DOM 顺序（取消在上、确定在下），主操作贴近拇指更易点 */
+    .confirm-actions {
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+
+    .confirm-actions .btn,
+    .confirm-actions .btn-primary {
+        width: 100%;
+        min-height: 48px;
+    }
+}
+
 /* 会话失效横幅：固定在顶部，不遮挡内容也不打断输入 */
 .session-expired-bar {
     position: fixed;

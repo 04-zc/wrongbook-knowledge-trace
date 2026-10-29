@@ -1444,6 +1444,29 @@
         </div>
     </div>
 
+    <!-- 统一确认框 / 提示框（替代浏览器原生 confirm/alert） -->
+    <div class="modal modal-confirm" v-if="dialog.show" @click.self="dialog.mode==='confirm' && resolveDialog(false)"
+         role="dialog" aria-modal="true" :aria-label="dialog.title">
+        <div class="modal-body confirm-body">
+            <div class="confirm-head">
+                <span class="confirm-icon" :class="dialog.danger ? 'is-danger' : 'is-info'">
+                    <ui-icon :name="dialog.danger ? 'triangle-alert' : 'info'"></ui-icon>
+                </span>
+                <h3>{{ dialog.title }}</h3>
+            </div>
+            <p class="confirm-message">{{ dialog.message }}</p>
+            <div class="confirm-actions">
+                <button type="button" class="btn" v-if="dialog.mode==='confirm'" @click="resolveDialog(false)">
+                    {{ dialog.cancelText }}
+                </button>
+                <button type="button" class="btn-primary" :class="{ 'btn-danger': dialog.danger }"
+                        @click="resolveDialog(true)">
+                    {{ dialog.confirmText }}
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 知识点详情（可叠加在「管理知识点」弹窗之上，需要更高的层级） -->
     <div class="modal modal-raised" v-if="kpDetail.show" @click.self="closeKpDetail">
         <div class="modal-body edit-modal">
