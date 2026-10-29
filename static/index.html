@@ -1352,6 +1352,7 @@
                 </div>
             </div>
             <div class="detail-panel" v-show="graphDetail.tab==='knowledge'">
+                <p v-if="graphDetail.loadError" class="inline-error">{{ graphDetail.loadError }}</p>
                 <div v-if="graphDetail.materials.length" class="trace-block">
                     <label>已保存的知识库内容</label>
                     <details v-for="m in graphDetail.materials" :key="m.id" class="typical-item">
@@ -1476,6 +1477,7 @@
                 <label>知识点说明</label>
                 <div class="review-detail-text" v-html="latexHtml(kpDetail.kp && kpDetail.kp.description || '暂无详细说明，可以通过知识溯源或其他 AI 功能补充。')"></div>
             </div>
+            <p v-if="kpDetail.loadError" class="inline-error">{{ kpDetail.loadError }}</p>
             <div class="trace-block" v-if="kpDetail.materials.length">
                 <label>已保存的 AI 内容</label>
                 <details v-for="m in kpDetail.materials" :key="m.id" class="typical-item">

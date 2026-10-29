@@ -297,6 +297,7 @@ const appOptions = {
             graphDetail: {
                 show: false, kp: null, path: '', materials: [], aiContent: '', aiLoading: false,
                 resources: [],
+                loadError: '',
                 resourceForm: { type: 'textbook', title: '', url: '', page: '', content: '', attachment: '' },
                 tab: 'overview',
                 aiResources: [],
@@ -337,7 +338,7 @@ const appOptions = {
             typicalAiLoading: false,
             traceModal: { show: false, loading: false, saving: false, data: null },
             mindMapModal: { show: false, map: null, question: null, newLabel: '', newType: 'direct' },
-            kpDetail: { show: false, kp: null, path: '', materials: [], newType: 'note', newContent: '', aiDraftContent: '', aiDraftLoading: false },
+            kpDetail: { show: false, kp: null, path: '', materials: [], newType: 'note', newContent: '', aiDraftContent: '', aiDraftLoading: false, loadError: '' },
             cameraActive: false,
             cameraError: '',
             cameraStream: null
@@ -1335,6 +1336,7 @@ const appOptions = {
                 newType: 'note',
                 newContent: '',
                 resources: [],
+                loadError: '',
                 resourceForm: { type: 'textbook', title: '', url: '', page: '', content: '', attachment: '' },
                 tab: 'overview',
                 aiResources: [],
@@ -1349,6 +1351,10 @@ const appOptions = {
                 this.graphDetail.resources = rr.data || [];
             } catch (e) {
                 this.graphDetail.materials = [];
+                // 不能静默：否则用户以为「这个知识点没有内容」，
+                // 实际是加载失败，会误以为数据丢了。
+                this.graphDetail.loadError = '知识库内容加载失败：' +
+                    ((e.response && e.response.data && e.response.data.error) || e.message || '未知错误');
             }
         },
         async generateGraphSummary() {
@@ -1415,20 +1421,28 @@ const appOptions = {
             if (!c.aiDraftContent) return;
             c.newContent = c.aiDraftContent;
         },
-        async createMaterial(containerKey) {            const c = this[containerKey];
+        async createMaterial(containerKey) {
+            const c = this[containerKey];
             const content = (c.newContent || '').trim();
             if (!content) {
                 await showAlert('请输入内容');
                 return;
             }
             if (!await askConfirm('确认新增这条知识库内容？')) return;
-            await axios.post('/api/ai/materials', {
-                kp_id: c.kp.id,
-                mode: c.newType,
-                content
-            });
-            c.newContent = '';
-            await this.reloadMaterials(containerKey);
+            // 防止确认框关闭后、请求返回前再次点击导致重复插入
+            if (this._creatingMaterial) return;
+            this._creatingMaterial = true;
+            try {
+                await axios.post('/api/ai/materials', {
+                    kp_id: c.kp.id,
+                    mode: c.newType,
+                    content
+                });
+                c.newContent = '';
+                await this.reloadMaterials(containerKey);
+            } finally {
+                this._creatingMaterial = false;
+            }
         },
         async deleteMaterial(m, containerKey) {
             if (!await askConfirm('确定删除这条知识库内容？')) return;
@@ -2191,23 +2205,27 @@ const appOptions = {
                 return;
             }
             if (!await askConfirm('确认保存这道错题？')) return;
+            // 确认框关闭到请求返回之间存在窗口期，连点会重复建题
+            if (this._savingQuestion) return;
+            this._savingQuestion = true;
             try {
                 if (this.form.id) {
                     await axios.put(`/api/questions/${this.form.id}`, this.form);
                 } else {
                     await axios.post('/api/questions', this.form);
                 }
+                await showAlert('保存成功');
+                this.resetForm();
+                await this.loadQuestions();
+                await this.loadLibraryPage();
+                await this.loadWeak();
+                this.currentNav = 'library';
             } catch (err) {
                 const data = (err.response && err.response.data) || {};
                 await showAlert(data.error || '保存失败，请重试');
-                return;
+            } finally {
+                this._savingQuestion = false;
             }
-            await showAlert('保存成功');
-            this.resetForm();
-            await this.loadQuestions();
-            await this.loadLibraryPage();
-            await this.loadWeak();
-            this.currentNav = 'library';
         },
         resetForm() {
             this.form = this.emptyForm();
@@ -2467,12 +2485,16 @@ const appOptions = {
                 this.addSubjectError = '该学科已存在';
                 return;
             }
+            if (this._addingSubject) return;   // 连点确认时不重复创建
+            this._addingSubject = true;
             try {
                 await axios.post('/api/subjects', { name });
             } catch (e) {
                 this.addSubjectError = (e.response && e.response.data && e.response.data.error) || '添加失败，请重试';
+                this._addingSubject = false;
                 return;
             }
+            this._addingSubject = false;
             this.showAddSubjectModal = false;
             this.newSubjectName = '';
             this.addSubjectError = '';
@@ -2621,13 +2643,16 @@ const appOptions = {
                 newType: 'note',
                 newContent: '',
                 aiDraftContent: '',
-                aiDraftLoading: false
+                aiDraftLoading: false,
+                loadError: ''
             };
             try {
                 const res = await axios.get('/api/ai/materials', { params: { kp_id: kp.id } });
                 this.kpDetail.materials = res.data || [];
             } catch (e) {
                 this.kpDetail.materials = [];
+                this.kpDetail.loadError = '知识库内容加载失败：' +
+                    ((e.response && e.response.data && e.response.data.error) || e.message || '未知错误');
             }
         },
         // 关闭知识点详情；若它是由「管理知识点」里点开的，回到知识树

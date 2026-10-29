@@ -1110,6 +1110,19 @@
     margin-bottom: var(--space-4);
 }
 
+/* 就地错误提示：用于「加载失败」这类不能静默的情况，
+   避免用户把「加载出错」误读成「本来就没有内容」 */
+.inline-error {
+    margin: 0 0 var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    color: #991b1b;
+    font-size: var(--fs-sm);
+    line-height: 1.6;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: var(--r-md);
+}
+
 /* ---- 统一确认框 / 提示框 ---- */
 .modal-confirm {
     z-index: calc(var(--z-toast) - 1);   /* 高于普通弹窗，确保盖在最上面 */
