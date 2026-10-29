@@ -421,6 +421,16 @@ const appOptions = {
     },
     mounted() {
         this.bootstrap();
+        // 全局 Escape：按层关闭最上面的弹窗。弹窗打开时全屏遮罩会盖住
+        // 侧边栏等所有可点区域，没有键盘退出方式时用户会觉得界面卡死。
+        this._onKeydown = (e) => {
+            if (e.key !== 'Escape') return;
+            this.closeTopOverlay();
+        };
+        window.addEventListener('keydown', this._onKeydown);
+    },
+    beforeUnmount() {
+        if (this._onKeydown) window.removeEventListener('keydown', this._onKeydown);
     },
     methods: {
         // 薄弱指数分档：用于首页 TOP3 的配色与进度条长度（模板里带参数调用，必须在 methods）
@@ -699,6 +709,9 @@ const appOptions = {
         },
         goTo(key) {
             this.mobileMenuOpen = false;
+            // 切换页面时关掉所有弹窗：否则弹窗及其全屏遮罩会留在最上层，
+            // 挡住刚切过去的页面，看起来像「点了导航没反应」。
+            this.dismissAllOverlays();
             if (key === 'trash') {
                 this.currentNav = 'library';
                 this.openTrash();
@@ -711,6 +724,58 @@ const appOptions = {
             // 离开录入页就清掉方式选择，下次进入总是先看到三种方式的挑选页
             if (key !== 'input') this.inputMode = '';
             if (key === 'library') this.loadLibraryPage();
+        },
+        // 关闭当前最上层的一个弹窗（Escape 键使用）。
+        // 按「后开的先关」顺序判断，保证一次只退一层。
+        closeTopOverlay() {
+            if (this.kpDetail && this.kpDetail.show) { this.closeKpDetail(); return true; }
+            if (this.cameraActive) { this.closeCamera(); return true; }
+            if (this.showKpSelector) { this.showKpSelector = false; return true; }
+            if (this.batchKpModal && this.batchKpModal.show) { this.batchKpModal.show = false; return true; }
+            if (this.showPlanModal) { this.showPlanModal = false; return true; }
+            if (this.traceModal && this.traceModal.show) { this.traceModal.show = false; return true; }
+            if (this.mindMapModal && this.mindMapModal.show) { this.mindMapModal.show = false; return true; }
+            if (this.typicalModal && this.typicalModal.show) { this.typicalModal.show = false; return true; }
+            if (this.aiModal && this.aiModal.show) { this.aiModal.show = false; return true; }
+            if (this.graphDetail && this.graphDetail.show) { this.graphDetail.show = false; return true; }
+            if (this.detailQuestion) { this.detailQuestion = null; return true; }
+            if (this.importPreview && this.importPreview.length) { this.cancelImport(); return true; }
+            if (this.showEditModal) { this.closeEditModal(); return true; }
+            if (this.showPendingKpModal) { this.showPendingKpModal = false; return true; }
+            if (this.showWeakKpModal) { this.closeWeakKpModal(); return true; }
+            if (this.showDeleteSubjectModal) { this.showDeleteSubjectModal = false; this.pendingDeleteSubject = null; return true; }
+            if (this.showAddSubjectModal) { this.showAddSubjectModal = false; return true; }
+            if (this.showKpManager) { this.closeKpManager(); return true; }
+            if (this.showLlmModal) { this.showLlmModal = false; return true; }
+            if (this.showResetModal) { this.showResetModal = false; return true; }
+            if (this.showAccountModal) { this.showAccountModal = false; return true; }
+            return false;
+        },
+        // 统一收起所有弹层。用于切页等场景，避免遮罩残留在最上层挡住新内容。
+        dismissAllOverlays() {
+            this.showAccountModal = false;
+            this.showResetModal = false;
+            this.showLlmModal = false;
+            this.showEditModal = false;
+            this.showPendingKpModal = false;
+            this.showWeakKpModal = false;
+            this.showAddSubjectModal = false;
+            this.showDeleteSubjectModal = false;
+            this.showKpManager = false;
+            this.showPlanModal = false;
+            this.showKpSelector = false;
+            this.detailQuestion = null;
+            this.cameraActive = false;
+            this.importPreview = [];
+            this.pendingDeleteSubject = null;
+            this.reopenKpManagerAfterDetail = false;
+            if (this.aiModal) this.aiModal.show = false;
+            if (this.typicalModal) this.typicalModal.show = false;
+            if (this.graphDetail) this.graphDetail.show = false;
+            if (this.kpDetail) this.kpDetail.show = false;
+            if (this.traceModal) this.traceModal.show = false;
+            if (this.mindMapModal) this.mindMapModal.show = false;
+            if (this.batchKpModal) this.batchKpModal.show = false;
         },
         isNavActive(nav) {
             if (nav.key === 'trash') return this.currentNav === 'library' && this.trashMode;
