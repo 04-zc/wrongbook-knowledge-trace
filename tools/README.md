@@ -4,7 +4,7 @@
 
 ## 测试脚本
 
-四个脚本都使用临时数据库，不会读写项目的 `data.db`。
+六个 Python 脚本都使用临时数据库，不会读写项目的 `data.db`；`test_pwa_offline.js` 只检查 Service Worker 缓存策略。
 
 | 脚本 | 用途 |
 | --- | --- |
