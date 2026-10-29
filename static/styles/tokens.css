@@ -82,6 +82,9 @@
     --z-overlay: 110;
     --z-header: 40;
     --z-modal: 200;
+    /* 叠加在已有弹窗之上的详情层，必须高于 --z-modal，
+       否则会被底层弹窗遮住，表现为「点了没反应」 */
+    --z-modal-raised: 215;
     --z-toast: 240;
 
     --bg: var(--c-surface-muted);

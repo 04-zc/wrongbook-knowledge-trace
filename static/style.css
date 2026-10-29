@@ -2662,6 +2662,13 @@ textarea.ai-content {
     animation: overlay-enter var(--dur-fast) var(--ease-enter) both;
 }
 
+/* 叠加在已有弹窗之上的详情层。
+   所有 .modal 默认同层级，DOM 顺序决定谁在上，从底层弹窗里再开一层时
+   会被盖住、点击也被下层遮罩吃掉——必须显式抬高一层。 */
+.modal.modal-raised {
+    z-index: var(--z-modal-raised);
+}
+
 .modal-body {
     width: 100%;
     max-width: 680px;

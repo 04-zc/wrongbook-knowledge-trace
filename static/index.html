@@ -1444,8 +1444,8 @@
         </div>
     </div>
 
-    <!-- 知识点详情 -->
-    <div class="modal" v-if="kpDetail.show" @click.self="kpDetail.show=false">
+    <!-- 知识点详情（可叠加在「管理知识点」弹窗之上，需要更高的层级） -->
+    <div class="modal modal-raised" v-if="kpDetail.show" @click.self="closeKpDetail">
         <div class="modal-body edit-modal">
             <h3>{{ kpDetail.kp && kpDetail.kp.name }}</h3>
             <p class="typical-source">{{ kpDetail.path }}</p>
@@ -1484,7 +1484,7 @@
                 <p class="add-hint" v-if="kpDetail.aiDraftContent">AI 已生成精简草稿，点「用 AI 结果填充」写入上方输入框。</p>
             </div>
             <div class="modal-actions">
-                <button class="btn" @click="kpDetail.show=false">关闭</button>
+                <button class="btn" @click="closeKpDetail">关闭</button>
             </div>
         </div>
     </div>

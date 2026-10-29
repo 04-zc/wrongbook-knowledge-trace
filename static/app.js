@@ -105,6 +105,7 @@ const appOptions = {
             pendingDeleteQuestionCount: 0,
             deletingSubject: false,
             showKpManager: false,
+            reopenKpManagerAfterDetail: false,
             // 孤儿图片清理
             orphanList: [],
             orphanScanning: false,
@@ -2413,6 +2414,12 @@ const appOptions = {
         },
         async openKpDetail(kp) {
             if (!kp) return;
+            // 从「管理知识点」弹窗里点进详情时，先把底层弹窗收起来：
+            // 两层弹窗同层级会互相遮挡，且下层的全屏遮罩会吃掉点击，
+            // 表现就是反复点没反应、页面像卡死。
+            // 记下它，详情关闭后自动恢复，用户回到原来的知识树。
+            this.reopenKpManagerAfterDetail = this.showKpManager;
+            this.showKpManager = false;
             const byId = {};
             this.knowledgePoints.forEach(k => { byId[k.id] = k; });
             const names = [kp.name];
@@ -2438,6 +2445,14 @@ const appOptions = {
                 this.kpDetail.materials = res.data || [];
             } catch (e) {
                 this.kpDetail.materials = [];
+            }
+        },
+        // 关闭知识点详情；若它是由「管理知识点」里点开的，回到知识树
+        closeKpDetail() {
+            this.kpDetail.show = false;
+            if (this.reopenKpManagerAfterDetail) {
+                this.reopenKpManagerAfterDetail = false;
+                this.showKpManager = true;
             }
         },
         toggleDirRow(row) {
