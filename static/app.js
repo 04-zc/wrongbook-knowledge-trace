@@ -14,6 +14,39 @@ function rememberCsrfToken(data) {
     }
 }
 
+// 会话失效提示：在页面顶部显示一条横幅，提供「重新登录」按钮。
+// 不调用 alert，因为它会打断用户输入且阻塞渲染；也不自动刷新，
+// 因为刷新会丢掉正在编辑的内容，而且未必能修好会话。
+function notifySessionExpired() {
+    if (document.getElementById('session-expired-bar')) return;
+    const bar = document.createElement('div');
+    bar.id = 'session-expired-bar';
+    bar.className = 'session-expired-bar';
+    bar.setAttribute('role', 'alert');
+    bar.innerHTML =
+        '<span>登录状态已失效，请重新登录后继续操作（当前页面的内容不会被清空）。</span>' +
+        '<button type="button" id="session-expired-action">重新登录</button>' +
+        '<button type="button" id="session-expired-dismiss" aria-label="关闭提示">稍后再说</button>';
+    document.body.appendChild(bar);
+    const action = bar.querySelector('#session-expired-action');
+    if (action) {
+        action.addEventListener('click', () => {
+            clearCachedUserId();
+            sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+            window.location.href = '/';
+        });
+    }
+    const dismiss = bar.querySelector('#session-expired-dismiss');
+    if (dismiss) {
+        dismiss.addEventListener('click', () => dismissSessionExpiredBar());
+    }
+}
+
+function dismissSessionExpiredBar() {
+    const bar = document.getElementById('session-expired-bar');
+    if (bar && bar.parentNode) bar.parentNode.removeChild(bar);
+}
+
 axios.interceptors.request.use(config => {
     const method = (config.method || 'get').toLowerCase();
     if (csrfToken && ['post', 'put', 'delete', 'patch'].indexOf(method) !== -1) {
@@ -38,12 +71,16 @@ axios.interceptors.response.use(
             return axios.get('/api/auth/me').then(() => axios(err.config));
         }
         if (err.response && err.response.status === 401 && !isAuthCall) {
-            // 会话已失效：清掉本地与 Service Worker 的用户缓存。
-            // 必须只重载一次，否则每个失效请求都触发 reload，会形成刷新死循环。
+            // 会话已失效。原先这里直接 window.location.reload()，
+            // 问题在于：任何一个接口偶发 401 都会强制刷新整页，用户正在
+            // 填写的题干、解析等内容全部丢失，而且刷新本身也无法修复
+            // 「服务端就是没认出来」的情况。
+            // 改为：清缓存 + 提示，由用户决定是否重新登录。
+            // 提示只弹一次，避免并发请求同时 401 时刷屏。
             clearCachedUserId();
             if (!sessionStorage.getItem(SESSION_EXPIRED_FLAG)) {
                 sessionStorage.setItem(SESSION_EXPIRED_FLAG, '1');
-                window.location.reload();
+                notifySessionExpired();
             }
         }
         return Promise.reject(err);
@@ -451,6 +488,7 @@ const appOptions = {
                 const res = await axios.get('/api/auth/me');
                 if (res.data.user) {
                     sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+                    dismissSessionExpiredBar();
                     this.authUser = res.data.user;
                     setCachedUserId(this.authUser.id);
                     await this.init();
@@ -507,6 +545,8 @@ const appOptions = {
                 const url = this.authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
                 const res = await axios.post(url, { username, password });
                 this.authUser = res.data.user;
+                sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+                dismissSessionExpiredBar();
                 setCachedUserId(this.authUser.id);
                 this.authUsername = '';
                 this.authPassword = '';
@@ -534,6 +574,8 @@ const appOptions = {
             this.authUsername = '';
             this.authPassword = '';
             this.authConfirm = '';
+            sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+            dismissSessionExpiredBar();
         },
         openAccountModal() {
             this.mobileMenuOpen = false;

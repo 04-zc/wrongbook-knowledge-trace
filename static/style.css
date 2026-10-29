@@ -1110,6 +1110,51 @@
     margin-bottom: var(--space-4);
 }
 
+/* 会话失效横幅：固定在顶部，不遮挡内容也不打断输入 */
+.session-expired-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: var(--z-toast);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    color: #ffffff;
+    font-size: var(--fs-sm);
+    background: #b45309;
+    box-shadow: var(--sh-2);
+}
+
+.session-expired-bar button {
+    min-height: 36px;
+    padding: var(--space-1) var(--space-4);
+    color: #b45309;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+    background: #ffffff;
+    border: 0;
+    border-radius: var(--r-sm);
+}
+
+.session-expired-bar button:hover {
+    background: var(--c-surface-muted);
+}
+
+.session-expired-bar #session-expired-dismiss {
+    background: transparent;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.session-expired-bar #session-expired-dismiss:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
 /* 孤儿图片清理：文件列表 */
 .orphan-list {
     margin-top: var(--space-3);
